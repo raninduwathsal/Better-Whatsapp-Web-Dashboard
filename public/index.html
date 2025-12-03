@@ -33,6 +33,15 @@
       .modal .panel { width:90%; max-width:800px; height:80%; background:#fff; border-radius:8px; padding:12px; box-shadow:0 6px 24px rgba(0,0,0,0.2); display:flex; flex-direction:column }
       .modal .panel .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px }
       .modal .panel .body { flex:1; overflow:auto; padding:8px; background:#f7f7f7; border-radius:6px }
+      .modal .panel .body img { max-width:100%; height:auto; display:block; margin:6px 0 }
+      .modal .panel .body iframe { display:block; margin:6px 0 }
+      /* sticker style in compact cards */
+      .msg .bubble img { display:inline-block }
+      /* quick replies */
+      #quick-replies-container { margin-left:12px }
+      .qr-btn { background:#fff;border:1px solid #ccc;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px }
+      .qr-btn.primary { background:#25D366;color:#fff;border-color:transparent }
+
       .modal .panel .composer { margin-top:8px; display:flex; gap:8px }
       .modal .panel .composer input { flex:1; padding:8px }
       .modal .panel .composer button { padding:8px 10px }
@@ -41,6 +50,7 @@
   <body>
     <header>
       <h2>WA Dash V2</h2>
+      <div id="quick-replies-container" style="display:flex;align-items:center;gap:8px"></div>
       <div id="status">Connecting...</div>
     </header>
 
