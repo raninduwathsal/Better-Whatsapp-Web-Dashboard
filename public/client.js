@@ -21,6 +21,8 @@ let tagAssignments = {}; // chatId -> [tagId]
 let selectedTagFilters = new Set();
 let tagsSettingsOpen = false;
 let tagsImportHandlerAttached = false;
+let notesSettingsOpen = false;
+let sidebarVisible = false;
 
 // quick replies (server-backed)
 let quickReplies = []; // {id, text, created_at}
@@ -59,14 +61,14 @@ async function deleteQuickReplyOnServer(id){
 }
 
 // subscribe to server-side updates
-socket.on('quick_replies_updated', ()=> loadQuickRepliesFromServer());
+socket.on('quick_replies_updated', ()=> { loadQuickRepliesFromServer(); renderQuickReplies(); });
 // initial load
 loadQuickRepliesFromServer();
 // tags
-socket.on('tags_updated', ()=> loadTagsFromServer());
+socket.on('tags_updated', ()=> { loadTagsFromServer(); renderTagFilterChips(); });
 loadTagsFromServer();
-// ensure central notes settings button
-ensureNotesSettingsButton();
+// ensure central settings sidebar
+createSettingsSidebar();
 
 // notes counts loader
 async function loadNotesCountsFromServer(){
@@ -159,6 +161,30 @@ function renderChats(){
     if (selectedChats.has(c.chatId)) el.classList.add('selected');
     if (c.unreadCount > 0) el.classList.add('unread');
 
+    // Add colored left border for assigned tags
+    const assignedIds = tagAssignments[c.chatId] || [];
+    if (assignedIds.length > 0) {
+      const tagColors = assignedIds.map(tid => {
+        const t = tags.find(x => Number(x.id) === Number(tid));
+        return t ? (t.color || '#999') : '#999';
+      });
+      if (tagColors.length === 1) {
+        el.style.borderLeft = `4px solid ${tagColors[0]}`;
+      } else if (tagColors.length > 1) {
+        // Create gradient for multiple tags
+        const gradientStops = tagColors.map((color, idx) => {
+          const start = (idx / tagColors.length) * 100;
+          const end = ((idx + 1) / tagColors.length) * 100;
+          return `${color} ${start}%, ${color} ${end}%`;
+        }).join(', ');
+        el.style.borderLeft = `4px solid transparent`;
+        el.style.backgroundImage = `linear-gradient(to bottom, ${gradientStops})`;
+        el.style.backgroundPosition = 'left';
+        el.style.backgroundSize = '4px 100%';
+        el.style.backgroundRepeat = 'no-repeat';
+      }
+    }
+
     // header: phone/name + unread count
     const header = document.createElement('div'); header.className='meta';
     const left = document.createElement('div');
@@ -177,7 +203,6 @@ function renderChats(){
     }
     // tag badges container
     const badgeWrap = document.createElement('span'); badgeWrap.className = 'tag-badges'; badgeWrap.style.marginLeft='8px';
-    const assignedIds = tagAssignments[c.chatId] || [];
     for (const tid of assignedIds){
       const t = tags.find(x=>Number(x.id) === Number(tid));
       if (!t) continue;
@@ -307,16 +332,7 @@ function renderChats(){
 
 function renderQuickReplies(){
   let container = document.getElementById('quick-replies-container');
-  // defensive: create container if missing
-  if (!container) {
-    const header = document.querySelector('header');
-    container = document.createElement('div');
-    container.id = 'quick-replies-container';
-    container.style.display = 'flex';
-    container.style.alignItems = 'center';
-    container.style.gap = '8px';
-    if (header) header.insertBefore(container, header.children[1] || null);
-  }
+  if (!container) return;
   container.innerHTML = '';
   // Add button to create new quick reply
   const addBtn = document.createElement('button');
@@ -332,19 +348,6 @@ function renderQuickReplies(){
     });
   });
   container.appendChild(addBtn);
-
-  // Settings toggle (collapsible panel)
-  const settingsBtn = document.createElement('button');
-  settingsBtn.className = 'qr-btn';
-  settingsBtn.textContent = '⚙';
-  settingsBtn.title = 'Quick replies settings';
-  settingsBtn.addEventListener('click', (e)=>{
-    e.stopPropagation();
-    quickRepliesSettingsOpen = !quickRepliesSettingsOpen;
-    renderQuickReplies();
-    renderQuickRepliesSettings();
-  });
-  container.appendChild(settingsBtn);
 
   // Show quick reply buttons, collapse if many
   const maxVisible = showAllQuickReplies ? quickReplies.length : 6;
@@ -378,21 +381,17 @@ function renderQuickReplies(){
 }
 
 function renderQuickRepliesSettings(){
-  let panel = document.getElementById('qr-settings-panel');
+  // render quick replies settings inline into sidebar if present
+  let panel = document.getElementById('sidebar-quick-replies');
   if (!panel){
-    panel = document.createElement('div'); panel.id = 'qr-settings-panel';
-    panel.style.border = '1px solid #ddd';
-    panel.style.padding = '8px';
-    panel.style.marginTop = '8px';
-    panel.style.background = '#fff';
-    const header = document.querySelector('header');
-    if (header) header.parentNode.insertBefore(panel, header.nextSibling);
-    else document.body.appendChild(panel);
+    // create container inside sidebar if exists
+    const sidebar = document.getElementById('settings-sidebar');
+    if (sidebar){ panel = document.createElement('div'); panel.id = 'sidebar-quick-replies'; panel.style.padding='8px'; panel.style.borderBottom='1px solid #eee'; sidebar.appendChild(panel); }
+    else { panel = document.getElementById('qr-settings-panel'); if (!panel){ panel = document.createElement('div'); panel.id='qr-settings-panel'; panel.style.border='1px solid #ddd'; panel.style.padding='8px'; panel.style.marginTop='8px'; panel.style.background='#fff'; const header = document.querySelector('header'); if (header) header.parentNode.insertBefore(panel, header.nextSibling); else document.body.appendChild(panel); } }
   }
   // hide when closed
   if (!quickRepliesSettingsOpen){ panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
-  panel.innerHTML = '';
+  panel.style.display = 'block'; panel.innerHTML = ''; panel.style.padding = '12px';
   const titleRow = document.createElement('div'); titleRow.style.display='flex'; titleRow.style.alignItems='center'; titleRow.style.justifyContent='space-between';
   const title = document.createElement('div'); title.style.fontWeight='bold'; title.textContent = 'Quick Replies Settings';
   const toolbar = document.createElement('div'); toolbar.style.display='flex'; toolbar.style.gap='8px';
@@ -444,8 +443,8 @@ function renderQuickRepliesSettings(){
 
   // list items
   quickReplies.forEach((qr, idx)=>{
-    const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.marginTop='6px';
-    const label = document.createElement('div'); label.style.flex='1'; label.style.whiteSpace='pre-wrap'; label.textContent = qr.text || '';
+    const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.padding='12px'; row.style.marginTop='0'; row.style.background= idx % 2 === 0 ? '#fff' : '#f9f9f9'; row.style.borderBottom='1px solid #e0e0e0';
+    const label = document.createElement('div'); label.style.flex='1'; label.style.whiteSpace='pre-wrap'; label.style.fontSize='13px'; label.textContent = qr.text || '';
     const edit = document.createElement('button'); edit.className='qr-btn'; edit.textContent='Edit';
     edit.addEventListener('click', ()=>{
       openQuickReplyEditor(qr.text, (v)=>{
@@ -712,6 +711,11 @@ function openNotesModal(chatId, title){
 async function showNotesPreviewBubble(chatId, anchorEl){
   // Avoid duplicate
   if (anchorEl._noteBubble) return;
+
+  const notes = await loadNotesForChat(chatId);
+  // Don't show bubble if no notes available
+  if (!notes || notes.length === 0) return;
+
   const rect = anchorEl.getBoundingClientRect();
   const bubble = document.createElement('div');
   bubble.className = 'context-menu';
@@ -737,27 +741,22 @@ async function showNotesPreviewBubble(chatId, anchorEl){
   const hdr = document.createElement('div'); hdr.style.fontWeight='bold'; hdr.style.marginBottom='6px'; hdr.textContent = 'Notes Preview';
   bubble.appendChild(hdr);
 
-  const notes = await loadNotesForChat(chatId);
-  if (!notes || notes.length === 0){
-    const empty = document.createElement('div'); empty.style.color = '#666'; empty.textContent = 'No notes'; bubble.appendChild(empty);
-  } else {
-    const list = document.createElement('div'); list.style.display='flex'; list.style.flexDirection='column'; list.style.gap='8px';
-    const showCount = Math.min(3, notes.length);
-    for (let i=0;i<showCount;i++){
-      const n = notes[i];
-      const item = document.createElement('div'); item.style.padding='8px'; item.style.border='1px solid #f0f0f0'; item.style.borderRadius='6px'; item.style.background='#fff';
-      const t = document.createElement('div'); t.style.whiteSpace='pre-wrap'; t.style.fontSize='13px'; t.textContent = n.text;
-      const meta = document.createElement('div'); meta.style.fontSize='11px'; meta.style.color='#666'; meta.style.marginTop='6px'; meta.textContent = n.updatedAt ? `Updated ${new Date(n.updatedAt).toLocaleString()}` : (n.createdAt ? new Date(n.createdAt).toLocaleString() : '');
-      item.appendChild(t); item.appendChild(meta);
-      list.appendChild(item);
-    }
-    if (notes.length > 3){
-      // make list scrollable (bubble already has overflow)
-      const more = document.createElement('div'); more.style.fontSize='12px'; more.style.color='#666'; more.style.marginTop='6px'; more.textContent = `${notes.length - 3} more... scroll to see`;
-      list.appendChild(more);
-    }
-    bubble.appendChild(list);
+  const list = document.createElement('div'); list.style.display='flex'; list.style.flexDirection='column'; list.style.gap='8px';
+  const showCount = Math.min(3, notes.length);
+  for (let i=0;i<showCount;i++){
+    const n = notes[i];
+    const item = document.createElement('div'); item.style.padding='8px'; item.style.border='1px solid #f0f0f0'; item.style.borderRadius='6px'; item.style.background='#fff';
+    const t = document.createElement('div'); t.style.whiteSpace='pre-wrap'; t.style.fontSize='13px'; t.textContent = n.text;
+    const meta = document.createElement('div'); meta.style.fontSize='11px'; meta.style.color='#666'; meta.style.marginTop='6px'; meta.textContent = n.updatedAt ? `Updated ${new Date(n.updatedAt).toLocaleString()}` : (n.createdAt ? new Date(n.createdAt).toLocaleString() : '');
+    item.appendChild(t); item.appendChild(meta);
+    list.appendChild(item);
   }
+  if (notes.length > 3){
+    // make list scrollable (bubble already has overflow)
+    const more = document.createElement('div'); more.style.fontSize='12px'; more.style.color='#666'; more.style.marginTop='6px'; more.textContent = `${notes.length - 3} more... scroll to see`;
+    list.appendChild(more);
+  }
+  bubble.appendChild(list);
 
   // attach hover behavior: when mouse leaves both anchor and bubble, remove
   let hovered = false;
@@ -850,14 +849,24 @@ function openTagContextMenu(x, y, chatId){
 }
 
 function renderTagFilterChips(){
-  const header = document.querySelector('header');
-  if (!header) return;
   let container = document.getElementById('tag-filter-chips');
-  if (!container){ container = document.createElement('div'); container.id = 'tag-filter-chips'; container.style.display='flex'; container.style.gap='6px'; container.style.alignItems='center'; header.appendChild(container); }
+  if (!container) return;
   container.innerHTML = '';
   if (tags && tags.length > 0) {
     tags.forEach(t=>{
-      const chip = document.createElement('button'); chip.className='tag-chip'; chip.textContent = t.name; chip.style.border = '1px solid #ddd'; chip.style.background = selectedTagFilters.has(String(t.id)) ? t.color : '#fff'; chip.style.color = selectedTagFilters.has(String(t.id)) ? '#000' : '#000'; chip.style.padding='4px 8px'; chip.style.borderRadius='12px';
+      const chip = document.createElement('button');
+      chip.className='tag-chip';
+      chip.textContent = t.name;
+      const isActive = selectedTagFilters.has(String(t.id));
+      if (isActive) {
+        chip.style.background = t.color || '#25D366';
+        chip.style.borderColor = t.color || '#25D366';
+        chip.style.color = '#fff';
+      } else {
+        chip.style.background = '#fff';
+        chip.style.borderColor = '#d1d7db';
+        chip.style.color = '#3b4a54';
+      }
       chip.addEventListener('click', ()=>{ if (selectedTagFilters.has(String(t.id))) selectedTagFilters.delete(String(t.id)); else selectedTagFilters.add(String(t.id)); renderTagFilterChips(); renderChats(); });
       container.appendChild(chip);
     });
@@ -867,44 +876,116 @@ function renderTagFilterChips(){
       allBtn.textContent = 'All Chats';
       allBtn.title = 'Show all chats';
       allBtn.className = 'qr-btn';
+      allBtn.style.marginLeft = '8px';
       allBtn.addEventListener('click', ()=>{ selectedTagFilters.clear(); renderTagFilterChips(); renderChats(); });
       container.appendChild(allBtn);
     }
   }
-  // tags settings toggle (always show)
-  const settingsBtn = document.createElement('button'); settingsBtn.textContent='Tags ⚙'; settingsBtn.className='qr-btn'; settingsBtn.addEventListener('click', ()=>{ tagsSettingsOpen = !tagsSettingsOpen; renderTagsSettings(); });
-  container.appendChild(settingsBtn);
-  // also ensure notes settings button is present in header
-  ensureNotesSettingsButton();
+  // settings moved to central sidebar (created at init)
+  createSettingsSidebar();
 }
 
-// create a central Notes settings button in the header
-function ensureNotesSettingsButton(){
+// Create a left settings sidebar with inline areas for Tags, Notes, Quick Replies
+function createSettingsSidebar(){
+  if (document.getElementById('settings-sidebar')) return;
+  const sidebar = document.createElement('div'); sidebar.id = 'settings-sidebar';
+  sidebar.style.position = 'fixed'; sidebar.style.left = '-308px'; sidebar.style.top = '0'; sidebar.style.width = '308px'; sidebar.style.height = '100vh'; sidebar.style.overflowY = 'auto'; sidebar.style.background = '#fff'; sidebar.style.borderRight = '1px solid #e1e1e1'; sidebar.style.boxShadow = '2px 0 8px rgba(0,0,0,0.1)'; sidebar.style.zIndex = 1200; sidebar.style.transition = 'left 0.3s ease';
+
+  const headerRow = document.createElement('div'); headerRow.style.display='flex'; headerRow.style.alignItems='center'; headerRow.style.justifyContent='space-between'; headerRow.style.padding='16px'; headerRow.style.borderBottom='1px solid #f0f0f0'; headerRow.style.background='#f7f7f7';
+  const title = document.createElement('div'); title.style.fontWeight='600'; title.style.fontSize='18px'; title.textContent = 'Settings';
+  const closeBtn = document.createElement('button'); closeBtn.textContent = '✕'; closeBtn.style.background='none'; closeBtn.style.border='none'; closeBtn.style.fontSize='20px'; closeBtn.style.cursor='pointer'; closeBtn.style.color='#666';
+  closeBtn.addEventListener('click', ()=> toggleSidebar());
+  headerRow.appendChild(title); headerRow.appendChild(closeBtn); sidebar.appendChild(headerRow);
+
+  // containers with WhatsApp-style section headers (clickable rows)
+  const tagsSection = document.createElement('div'); tagsSection.style.borderBottom='1px solid #f0f0f0';
+  const tagsHdr = document.createElement('div'); tagsHdr.style.padding='16px'; tagsHdr.style.cursor='pointer'; tagsHdr.style.display='flex'; tagsHdr.style.justifyContent='space-between'; tagsHdr.style.alignItems='center'; tagsHdr.style.background='#fff'; tagsHdr.addEventListener('mouseenter', ()=> tagsHdr.style.background='#f5f5f5'); tagsHdr.addEventListener('mouseleave', ()=> tagsHdr.style.background='#fff');
+  const tagsLabel = document.createElement('div'); tagsLabel.textContent = 'Tags'; tagsLabel.style.fontSize='15px';
+  const tagsChevron = document.createElement('span'); tagsChevron.textContent = '›'; tagsChevron.style.fontSize='20px'; tagsChevron.style.color='#999';
+  tagsHdr.appendChild(tagsLabel); tagsHdr.appendChild(tagsChevron); tagsSection.appendChild(tagsHdr);
+  const tagsContent = document.createElement('div'); tagsContent.id = 'sidebar-tags'; tagsContent.style.display='none'; tagsContent.style.padding='0'; tagsContent.style.background='#fafafa'; tagsSection.appendChild(tagsContent);
+  tagsHdr.addEventListener('click', ()=>{ tagsSettingsOpen = !tagsSettingsOpen; tagsChevron.textContent = tagsSettingsOpen ? '▾' : '›'; renderTagsSettings(); });
+  sidebar.appendChild(tagsSection);
+
+  const notesSection = document.createElement('div'); notesSection.style.borderBottom='1px solid #f0f0f0';
+  const notesHdr = document.createElement('div'); notesHdr.style.padding='16px'; notesHdr.style.cursor='pointer'; notesHdr.style.display='flex'; notesHdr.style.justifyContent='space-between'; notesHdr.style.alignItems='center'; notesHdr.style.background='#fff'; notesHdr.addEventListener('mouseenter', ()=> notesHdr.style.background='#f5f5f5'); notesHdr.addEventListener('mouseleave', ()=> notesHdr.style.background='#fff');
+  const notesLabel = document.createElement('div'); notesLabel.textContent = 'Notes'; notesLabel.style.fontSize='15px';
+  const notesChevron = document.createElement('span'); notesChevron.textContent = '›'; notesChevron.style.fontSize='20px'; notesChevron.style.color='#999';
+  notesHdr.appendChild(notesLabel); notesHdr.appendChild(notesChevron); notesSection.appendChild(notesHdr);
+  const notesContent = document.createElement('div'); notesContent.id = 'sidebar-notes'; notesContent.style.display='none'; notesContent.style.padding='0'; notesContent.style.background='#fafafa'; notesSection.appendChild(notesContent);
+  notesHdr.addEventListener('click', ()=>{ notesSettingsOpen = !notesSettingsOpen; notesChevron.textContent = notesSettingsOpen ? '▾' : '›'; renderNotesSettings(); });
+  sidebar.appendChild(notesSection);
+
+  const qrSection = document.createElement('div'); qrSection.style.borderBottom='1px solid #f0f0f0';
+  const qrHdr = document.createElement('div'); qrHdr.style.padding='16px'; qrHdr.style.cursor='pointer'; qrHdr.style.display='flex'; qrHdr.style.justifyContent='space-between'; qrHdr.style.alignItems='center'; qrHdr.style.background='#fff'; qrHdr.addEventListener('mouseenter', ()=> qrHdr.style.background='#f5f5f5'); qrHdr.addEventListener('mouseleave', ()=> qrHdr.style.background='#fff');
+  const qrLabel = document.createElement('div'); qrLabel.textContent = 'Quick Replies'; qrLabel.style.fontSize='15px';
+  const qrChevron = document.createElement('span'); qrChevron.textContent = '›'; qrChevron.style.fontSize='20px'; qrChevron.style.color='#999';
+  qrHdr.appendChild(qrLabel); qrHdr.appendChild(qrChevron); qrSection.appendChild(qrHdr);
+  const qrContent = document.createElement('div'); qrContent.id = 'sidebar-quick-replies'; qrContent.style.display='none'; qrContent.style.padding='0'; qrContent.style.background='#fafafa'; qrSection.appendChild(qrContent);
+  qrHdr.addEventListener('click', ()=>{ quickRepliesSettingsOpen = !quickRepliesSettingsOpen; qrChevron.textContent = quickRepliesSettingsOpen ? '▾' : '›'; renderQuickRepliesSettings(); });
+  sidebar.appendChild(qrSection);
+
+  // Logout button at bottom
+  const logoutSection = document.createElement('div'); logoutSection.style.borderTop='1px solid #f0f0f0'; logoutSection.style.marginTop='auto';
+  const logout = document.createElement('div'); logout.style.padding='16px'; logout.style.cursor='pointer'; logout.style.textAlign='center'; logout.style.color='#d9534f'; logout.style.fontSize='15px'; logout.textContent='Logout WhatsApp Session'; logout.style.background='#fff'; logout.addEventListener('mouseenter', ()=> logout.style.background='#fff5f5'); logout.addEventListener('mouseleave', ()=> logout.style.background='#fff');
+  logout.addEventListener('click', async ()=>{ if (!confirm('Logout WhatsApp session?')) return; try { const res = await fetch('/api/logout', { method: 'POST' }); if (!res.ok) { statusEl.textContent='Logout failed'; return; } statusEl.textContent='Logged out'; setTimeout(()=> location.reload(), 700); } catch (err){ console.error(err); statusEl.textContent='Logout failed'; } });
+  logoutSection.appendChild(logout); sidebar.appendChild(logoutSection);
+
+  document.body.appendChild(sidebar);
+
+  // Add hamburger menu to header
   const header = document.querySelector('header');
-  if (!header) return;
-  if (document.getElementById('notes-settings-btn')) return;
-  const btn = document.createElement('button');
-  btn.id = 'notes-settings-btn';
-  btn.className = 'qr-btn';
-  btn.textContent = 'Notes ⚙';
-  btn.addEventListener('click', ()=> openNotesSettingsPanel());
-  header.appendChild(btn);
+  const existingHamburger = document.getElementById('hamburger-menu');
+  if (existingHamburger){
+    existingHamburger.style.display = 'block';
+    existingHamburger.innerHTML = '☰';
+    existingHamburger.style.background='none';
+    existingHamburger.style.border='none';
+    existingHamburger.style.fontSize='24px';
+    existingHamburger.style.cursor='pointer';
+    existingHamburger.style.padding='8px 12px';
+    existingHamburger.style.marginRight='12px';
+    existingHamburger.style.color='#54656f';
+    existingHamburger.addEventListener('click', ()=> toggleSidebar());
+  }
 }
 
-function openNotesSettingsPanel(){
-  const modal = document.createElement('div'); modal.className='modal';
-  const panel = document.createElement('div'); panel.className='panel';
-  const header = document.createElement('div'); header.className='header';
-  const title = document.createElement('div'); title.textContent = 'Notes Settings';
-  const closeBtn = document.createElement('button'); closeBtn.textContent = 'Close';
-  header.appendChild(title);
-  header.appendChild(closeBtn);
+function toggleSidebar(){
+  const sidebar = document.getElementById('settings-sidebar');
+  const messages = document.getElementById('messages');
+  if (!sidebar) return;
+  sidebarVisible = !sidebarVisible;
+  if (sidebarVisible){
+    sidebar.style.left = '0';
+    if (messages) messages.style.marginLeft = '308px';
+  } else {
+    sidebar.style.left = '-308px';
+    if (messages) messages.style.marginLeft = '0';
+  }
+}
 
-  const body = document.createElement('div'); body.className='body';
+function renderNotesSettings(){
+  // render notes settings inline into sidebar if present
+  let panel = document.getElementById('sidebar-notes');
+  if (!panel){
+    const sidebar = document.getElementById('settings-sidebar');
+    if (sidebar){
+      panel = document.createElement('div'); panel.id = 'sidebar-notes'; panel.style.padding='8px'; panel.style.borderBottom='1px solid #eee'; sidebar.appendChild(panel);
+    } else {
+      // fallback to modal-like floating panel
+      panel = document.createElement('div'); panel.id = 'notes-settings-panel'; panel.style.border = '1px solid #ddd'; panel.style.padding = '8px'; panel.style.marginTop = '8px'; panel.style.background = '#fff'; const header = document.querySelector('header'); if (header) header.parentNode.insertBefore(panel, header.nextSibling); else document.body.appendChild(panel);
+    }
+  }
+  if (!notesSettingsOpen){ panel.style.display = 'none'; return; }
+  panel.style.display = 'block'; panel.innerHTML = ''; panel.style.padding = '12px';
+
+  const title = document.createElement('div'); title.style.fontWeight='bold'; title.textContent = 'Notes Settings'; title.style.marginBottom='12px'; panel.appendChild(title);
+  const btnRow = document.createElement('div'); btnRow.style.display='flex'; btnRow.style.gap='8px'; btnRow.style.marginBottom='12px';
   const exportBtn = document.createElement('button'); exportBtn.className='qr-btn'; exportBtn.textContent = 'Export All Notes';
   const importBtn = document.createElement('button'); importBtn.className='qr-btn'; importBtn.textContent = 'Import Notes (Append)';
-  const info = document.createElement('div'); info.style.marginTop = '8px'; info.style.color='#666'; info.textContent = 'Export creates a JSON backup of all notes. Import will append notes to matching chats using chatId or phone number fallback.';
-  body.appendChild(exportBtn); body.appendChild(importBtn); body.appendChild(info);
+  btnRow.appendChild(exportBtn); btnRow.appendChild(importBtn); panel.appendChild(btnRow);
+  const info = document.createElement('div'); info.style.marginTop = '8px'; info.style.color='#666'; info.style.fontSize='12px'; info.textContent = 'Export creates a JSON backup of all notes. Import will append notes to matching chats using chatId or phone number fallback.';
+  panel.appendChild(info);
 
   // hidden input for import
   let importInput = document.getElementById('notes-import-all-input');
@@ -936,71 +1017,60 @@ function openNotesSettingsPanel(){
       const js = await res.json();
       statusEl.textContent = `Import: ${js.imported || 0} imported, ${js.failed || 0} failed`;
       await loadNotesCountsFromServer();
+      renderNotesSettings();
     } catch (err){ console.error(err); statusEl.textContent = 'Import failed'; }
   });
-
-  panel.appendChild(header); panel.appendChild(body); modal.appendChild(panel); document.body.appendChild(modal);
-  closeBtn.addEventListener('click', ()=>{ document.body.removeChild(modal); });
 }
 
 function renderTagsSettings(){
-  let panel = document.getElementById('tags-settings-panel');
-  if (!panel){ panel = document.createElement('div'); panel.id = 'tags-settings-panel'; panel.style.border = '1px solid #ddd'; panel.style.padding = '8px'; panel.style.marginTop = '8px'; panel.style.background = '#fff'; const header = document.querySelector('header'); if (header) header.parentNode.insertBefore(panel, header.nextSibling); else document.body.appendChild(panel); }
+  // prefer rendering inside the left settings sidebar if present
+  let panel = document.getElementById('sidebar-tags');
+  if (!panel){
+    // create container inside sidebar if sidebar exists
+    const sidebar = document.getElementById('settings-sidebar');
+    if (sidebar){
+      panel = document.createElement('div'); panel.id = 'sidebar-tags'; panel.style.padding = '8px'; panel.style.borderBottom = '1px solid #eee'; sidebar.appendChild(panel);
+    } else {
+      // fallback to old floating panel
+      panel = document.getElementById('tags-settings-panel');
+      if (!panel){ panel = document.createElement('div'); panel.id = 'tags-settings-panel'; panel.style.border = '1px solid #ddd'; panel.style.padding = '8px'; panel.style.marginTop = '8px'; panel.style.background = '#fff'; const header = document.querySelector('header'); if (header) header.parentNode.insertBefore(panel, header.nextSibling); else document.body.appendChild(panel); }
+    }
+  }
+
   if (!tagsSettingsOpen){ panel.style.display = 'none'; return; }
-  panel.style.display = 'block'; panel.innerHTML = '';
+  panel.style.display = 'block'; panel.innerHTML = ''; panel.style.padding = '12px';
+
   const titleRow = document.createElement('div'); titleRow.style.display='flex'; titleRow.style.alignItems='center'; titleRow.style.justifyContent='space-between';
   const title = document.createElement('div'); title.style.fontWeight='bold'; title.textContent = 'Tags Settings';
   const toolbar = document.createElement('div'); toolbar.style.display='flex'; toolbar.style.gap='8px';
   const exportBtn = document.createElement('button'); exportBtn.className='qr-btn'; exportBtn.textContent='Export';
   exportBtn.addEventListener('click', async ()=>{ try { const res = await fetch('/api/tags/export'); if (!res.ok) { statusEl.textContent='Export failed'; return; } const js = await res.json(); const blob = new Blob([JSON.stringify(js, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `tags-${Date.now()}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); statusEl.textContent='Exported tags'; } catch (err){ console.error(err); statusEl.textContent='Export failed'; } });
   const importBtn = document.createElement('button'); importBtn.className='qr-btn'; importBtn.textContent='Import';
-  let importInput = document.getElementById('tags-import-input'); 
-  if (!importInput){ 
-    importInput = document.createElement('input'); 
-    importInput.type='file'; 
-    importInput.id='tags-import-input'; 
-    importInput.accept='.json,application/json'; 
-    importInput.style.display='none'; 
-    document.body.appendChild(importInput); 
-  }
+  let importInput = document.getElementById('tags-import-input');
+  if (!importInput){ importInput = document.createElement('input'); importInput.type='file'; importInput.id='tags-import-input'; importInput.accept='.json,application/json'; importInput.style.display='none'; document.body.appendChild(importInput); }
   importBtn.addEventListener('click', ()=>{ importInput.value=''; importInput.click(); });
-  
+
   // Attach the change handler only once
   if (!tagsImportHandlerAttached) {
     tagsImportHandlerAttached = true;
-    importInput.addEventListener('change', async (ev)=>{ 
-      const f = ev.target.files && ev.target.files[0]; 
-      if (!f) return; 
-      try { 
-        const txt = await f.text(); 
-        const parsed = JSON.parse(txt); 
-        const replace = confirm('Replace existing tags? OK = replace, Cancel = append'); 
-        const res = await fetch('/api/tags/import', { 
-          method: 'POST', 
-          headers: {'Content-Type':'application/json'}, 
-          body: JSON.stringify({ tags: parsed.tags || parsed, assignments: parsed.assignments || parsed.assignments || [], replace }) 
-        }); 
-        if (!res.ok) { statusEl.textContent='Import failed'; return; } 
-        const result = await res.json(); 
-        await loadTagsFromServer(); 
-        renderTagFilterChips(); 
-        renderTagsSettings(); 
-        statusEl.textContent='Imported tags'; 
-        if (result && result.assignments) { 
-          const a = result.assignments; 
-          alert(`Tags Import Report:\n\nTags imported: ${result.imported || 0}\n\nAssignments:\n• Total: ${a.total || 0}\n• Imported: ${a.imported || 0}\n• Skipped (duplicates): ${a.skipped || 0}\n• Failed: ${a.failed || 0}`); 
-        } 
-      } catch (err){ 
-        console.error(err); 
-        statusEl.textContent='Import failed'; 
-      } 
+    importInput.addEventListener('change', async (ev)=>{
+      const f = ev.target.files && ev.target.files[0]; if (!f) return;
+      try {
+        const txt = await f.text(); const parsed = JSON.parse(txt);
+        const replace = confirm('Replace existing tags? OK = replace, Cancel = append');
+        const res = await fetch('/api/tags/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tags: parsed.tags || parsed, assignments: parsed.assignments || parsed.assignments || [], replace }) });
+        if (!res.ok) { statusEl.textContent='Import failed'; return; }
+        const result = await res.json(); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); statusEl.textContent='Imported tags';
+        if (result && result.assignments){ const a = result.assignments; alert(`Tags Import Report:\n\nTags imported: ${result.imported || 0}\n\nAssignments:\n• Total: ${a.total || 0}\n• Imported: ${a.imported || 0}\n• Skipped (duplicates): ${a.skipped || 0}\n• Failed: ${a.failed || 0}`); }
+      } catch (err){ console.error(err); statusEl.textContent='Import failed'; }
     });
   }
+
   toolbar.appendChild(exportBtn); toolbar.appendChild(importBtn);
   titleRow.appendChild(title); titleRow.appendChild(toolbar); panel.appendChild(titleRow);
-  const createRow = document.createElement('div'); createRow.style.marginTop='8px'; const createBtn = document.createElement('button'); createBtn.textContent='Create Tag'; createBtn.className='qr-btn'; createBtn.addEventListener('click', ()=>{ openTagEditor('', '#ffcc00', async (v)=>{ if (!v) return; await createTagOnServer(v.name, v.color); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); }); }); createRow.appendChild(createBtn); panel.appendChild(createRow);
-  if (!tags || tags.length === 0){ const empty = document.createElement('div'); empty.style.marginTop='8px'; empty.textContent='No tags defined.'; panel.appendChild(empty); return; }
-  tags.forEach(t=>{ const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.marginTop='6px'; const label = document.createElement('div'); label.style.flex='1'; label.textContent = t.name; const color = document.createElement('div'); color.style.width='24px'; color.style.height='16px'; color.style.background = t.color; color.style.border='1px solid #ccc'; const edit = document.createElement('button'); edit.className='qr-btn'; edit.textContent='Edit'; edit.addEventListener('click', ()=>{ openTagEditor(t.name, t.color, async (v)=>{ if (!v) return; await updateTagOnServer(t.id, v.name, v.color); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); }); }); const del = document.createElement('button'); del.className='qr-btn'; del.textContent='Delete'; del.addEventListener('click', async ()=>{ try { const countRes = await fetch(`/api/tags/${t.id}/count`); if (!countRes.ok) throw new Error('Failed to get count'); const countData = await countRes.json(); const chatCount = countData.count || 0; const msg = chatCount > 0 ? `Delete tag "${t.name}"?\n\nThis tag is assigned to ${chatCount} chat${chatCount !== 1 ? 's' : ''}. Deleting it will remove the tag from these chats.` : `Delete tag "${t.name}"?`; if (!confirm(msg)) return; await deleteTagOnServer(t.id); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); } catch (err) { console.error(err); alert('Failed to delete tag'); } }); row.appendChild(label); row.appendChild(color); row.appendChild(edit); row.appendChild(del); panel.appendChild(row); });
+  const createRow = document.createElement('div'); createRow.style.marginTop='8px'; createRow.style.marginBottom='12px'; const createBtn = document.createElement('button'); createBtn.textContent='Create Tag'; createBtn.className='qr-btn'; createBtn.addEventListener('click', ()=>{ openTagEditor('', '#ffcc00', async (v)=>{ if (!v) return; await createTagOnServer(v.name, v.color); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); }); }); createRow.appendChild(createBtn); panel.appendChild(createRow);
+  if (!tags || tags.length === 0){ const empty = document.createElement('div'); empty.style.marginTop='8px'; empty.style.color='#999'; empty.textContent='No tags defined.'; panel.appendChild(empty); return; }
+  tags.forEach((t, idx)=>{ const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.padding='12px'; row.style.background= idx % 2 === 0 ? '#fff' : '#f9f9f9'; row.style.borderBottom='1px solid #e0e0e0'; const label = document.createElement('div'); label.style.flex='1'; label.textContent = t.name; const color = document.createElement('div'); color.style.width='24px'; color.style.height='16px'; color.style.background = t.color; color.style.border='1px solid #ccc'; const edit = document.createElement('button'); edit.className='qr-btn'; edit.textContent='Edit'; edit.addEventListener('click', ()=>{ openTagEditor(t.name, t.color, async (v)=>{ if (!v) return; await updateTagOnServer(t.id, v.name, v.color); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); }); }); const del = document.createElement('button'); del.className='qr-btn'; del.textContent='Delete'; del.addEventListener('click', async ()=>{ try { const countRes = await fetch(`/api/tags/${t.id}/count`); if (!countRes.ok) throw new Error('Failed to get count'); const countData = await countRes.json(); const chatCount = countData.count || 0; const msg = chatCount > 0 ? `Delete tag "${t.name}"?\n\nThis tag is assigned to ${chatCount} chat${chatCount !== 1 ? 's' : ''}. Deleting it will remove the tag from these chats.` : `Delete tag "${t.name}"?`; if (!confirm(msg)) return; await deleteTagOnServer(t.id); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); } catch (err) { console.error(err); alert('Failed to delete tag'); } }); row.appendChild(label); row.appendChild(color); row.appendChild(edit); row.appendChild(del); panel.appendChild(row); });
 }
 
 function getSelectedChatIds(){
@@ -1018,7 +1088,15 @@ function sendPreset(){
 sendBtn.addEventListener('click', sendPreset);
 refreshBtn.addEventListener('click', ()=> socket.emit('requestMessages'));
 
-// keyboard shortcut removed: sending is done via the Send button only
+// allow pressing Enter in the preset input to send the preset
+if (presetInput) {
+  presetInput.addEventListener('keydown', (e)=>{
+    if (e.key === 'Enter'){
+      e.preventDefault();
+      sendPreset();
+    }
+  });
+}
 
 // no periodic suppressed cleanup needed in this version
 
