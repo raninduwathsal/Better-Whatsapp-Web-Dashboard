@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test-quick-replies": "node test/test_quick_replies.js"
+    "test-quick-replies": "node test/test_quick_replies.js",
+    "test-tags": "node test/test_tags.js"
   },
   "keywords": [],
   "author": "",

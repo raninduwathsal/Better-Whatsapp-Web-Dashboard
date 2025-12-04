@@ -13,6 +13,12 @@ const pinned = new Set();
 // selection supports multi-select (ctrl/cmd click)
 const selectedChats = new Set();
 
+// tags state
+let tags = []; // {id, name, color}
+let tagAssignments = {}; // chatId -> [tagId]
+let selectedTagFilters = new Set();
+let tagsSettingsOpen = false;
+
 // quick replies (server-backed)
 let quickReplies = []; // {id, text, created_at}
 let showAllQuickReplies = false;
@@ -53,6 +59,9 @@ async function deleteQuickReplyOnServer(id){
 socket.on('quick_replies_updated', ()=> loadQuickRepliesFromServer());
 // initial load
 loadQuickRepliesFromServer();
+// tags
+socket.on('tags_updated', ()=> loadTagsFromServer());
+loadTagsFromServer();
 
 
 socket.on('connect', () => {
@@ -119,6 +128,12 @@ function renderChats(){
   });
 
   for (const c of sorted){
+    // filter by selectedTagFilters (if any)
+    if (selectedTagFilters.size > 0){
+      const assigned = tagAssignments[c.chatId] || [];
+      const match = assigned.some(tid => selectedTagFilters.has(String(tid)) || selectedTagFilters.has(Number(tid)));
+      if (!match) continue;
+    }
     const el = document.createElement('div');
     el.className = 'msg';
     el.dataset.chatId = c.chatId;
@@ -131,6 +146,20 @@ function renderChats(){
     const title = document.createElement('strong');
     title.textContent = c.name || '';
     left.appendChild(title);
+    // tag badges container
+    const badgeWrap = document.createElement('span'); badgeWrap.className = 'tag-badges'; badgeWrap.style.marginLeft='8px';
+    const assignedIds = tagAssignments[c.chatId] || [];
+    for (const tid of assignedIds){
+      const t = tags.find(x=>Number(x.id) === Number(tid));
+      if (!t) continue;
+      const dot = document.createElement('span');
+      dot.className = 'tag-dot';
+      dot.title = t.name;
+      dot.style.display='inline-block';
+      dot.style.width='12px'; dot.style.height='12px'; dot.style.borderRadius='6px'; dot.style.background = t.color || '#999'; dot.style.marginRight='6px';
+      badgeWrap.appendChild(dot);
+    }
+    left.appendChild(badgeWrap);
     const info = document.createElement('span');
     info.style.marginLeft = '8px';
     info.textContent = c.unreadCount>0 ? `${c.unreadCount} unread` : '';
@@ -210,6 +239,13 @@ function renderChats(){
       }
       // update visuals
       document.querySelectorAll('.msg').forEach(x=> x.classList.toggle('selected', selectedChats.has(x.dataset.chatId)));
+    });
+
+    // right-click context menu for tags
+    el.addEventListener('contextmenu', (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      openTagContextMenu(e.pageX, e.pageY, c.chatId);
     });
 
       // double-click to open full chat view
@@ -407,6 +443,182 @@ function openQuickReplyEditor(initialText, onSave){
   closeBtn.addEventListener('click', ()=> close(null));
   cancelBtn.addEventListener('click', ()=> close(null));
   saveBtn.addEventListener('click', ()=> close(ta.value));
+}
+
+// ------------------ Tags client functions ------------------
+async function loadTagsFromServer(){
+  try {
+    const res = await fetch('/api/tags/export');
+    if (!res.ok) throw new Error('failed to load tags');
+    const data = await res.json();
+    tags = Array.isArray(data.tags) ? data.tags : (data || []);
+    // build assignments map
+    tagAssignments = {};
+    const assigns = Array.isArray(data.assignments) ? data.assignments : (data.assignments || []);
+    for (const a of assigns){
+      if (!a.chat_id && !a.chatId) continue;
+      const cid = a.chat_id || a.chatId;
+      const tid = a.tag_id || a.tagId;
+      if (!tagAssignments[cid]) tagAssignments[cid] = [];
+      tagAssignments[cid].push(tid);
+    }
+  } catch (err){
+    console.error('Failed to load tags', err);
+    tags = [];
+    tagAssignments = {};
+  }
+  renderTagFilterChips();
+  renderChats();
+}
+
+async function createTagOnServer(name, color){
+  const res = await fetch('/api/tags', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, color }) });
+  if (!res.ok) throw new Error('create tag failed');
+  return await res.json();
+}
+
+async function updateTagOnServer(id, name, color){
+  const res = await fetch(`/api/tags/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, color }) });
+  if (!res.ok) throw new Error('update tag failed');
+  return await res.json();
+}
+
+async function deleteTagOnServer(id){
+  const res = await fetch(`/api/tags/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('delete tag failed');
+  return await res.json();
+}
+
+async function assignTagOnServer(tagId, chatId){
+  const res = await fetch('/api/tags/assign', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tagId, chatId }) });
+  if (!res.ok) throw new Error('assign failed');
+  return await res.json();
+}
+
+async function unassignTagOnServer(tagId, chatId){
+  const res = await fetch('/api/tags/unassign', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tagId, chatId }) });
+  if (!res.ok) throw new Error('unassign failed');
+  return await res.json();
+}
+
+function openTagEditor(initialName, initialColor, onSave){
+  const modal = document.createElement('div'); modal.className='modal';
+  const panel = document.createElement('div'); panel.className='panel';
+  const header = document.createElement('div'); header.className='header';
+  const hTitle = document.createElement('div'); hTitle.textContent = initialName ? 'Edit Tag' : 'New Tag';
+  const closeBtn = document.createElement('button'); closeBtn.textContent='Cancel';
+  header.appendChild(hTitle); header.appendChild(closeBtn);
+  const body = document.createElement('div'); body.className='body';
+  const nameInput = document.createElement('input'); nameInput.placeholder='Tag name'; nameInput.value = initialName || '';
+  const colorInput = document.createElement('input'); colorInput.type='color'; colorInput.value = initialColor || '#ffcc00';
+  body.appendChild(nameInput); body.appendChild(document.createElement('br'));
+  body.appendChild(colorInput);
+  const composer = document.createElement('div'); composer.className='composer';
+  const saveBtn = document.createElement('button'); saveBtn.textContent='Save'; saveBtn.className='qr-btn primary';
+  const cancelBtn = document.createElement('button'); cancelBtn.textContent='Cancel';
+  composer.appendChild(cancelBtn); composer.appendChild(saveBtn);
+  panel.appendChild(header); panel.appendChild(body); panel.appendChild(composer); modal.appendChild(panel); document.body.appendChild(modal);
+  function close(v){ document.body.removeChild(modal); onSave(v); }
+  closeBtn.addEventListener('click', ()=> close(null));
+  cancelBtn.addEventListener('click', ()=> close(null));
+  saveBtn.addEventListener('click', ()=> close({ name: nameInput.value.trim(), color: colorInput.value }));
+}
+
+// small context menu implementation
+let currentContextMenu = null;
+function openTagContextMenu(x, y, chatId){
+  if (currentContextMenu) { currentContextMenu.remove(); currentContextMenu = null; }
+  const menu = document.createElement('div'); menu.className='context-menu';
+  menu.style.position='fixed'; menu.style.left = (x) + 'px'; menu.style.top = (y) + 'px'; menu.style.background='#fff'; menu.style.border='1px solid #ccc'; menu.style.borderRadius='6px'; menu.style.padding='0'; menu.style.zIndex = 9999; menu.style.minWidth='240px'; menu.style.boxShadow='0 2px 10px rgba(0,0,0,0.2)'; menu.style.overflow='hidden';
+  const title = document.createElement('div'); title.style.fontWeight='bold'; title.style.padding='10px 12px'; title.style.fontSize='13px'; title.style.color='#666'; title.style.borderBottom='1px solid #eee'; title.textContent = 'Tags'; menu.appendChild(title);
+  // list tags as clickable menu items
+  if (tags && tags.length > 0) {
+    for (const t of tags){
+      const isAssigned = (tagAssignments[chatId]||[]).some(id => String(id) === String(t.id));
+      const row = document.createElement('div'); row.style.padding='10px 12px'; row.style.cursor='pointer'; row.style.display='flex'; row.style.alignItems='center'; row.style.userSelect='none'; row.style.fontSize='13px';
+      row.style.backgroundColor = isAssigned ? '#f0f0f0' : '#fff';
+      row.style.borderBottom='1px solid #f0f0f0';
+      row.addEventListener('mouseenter', ()=>{ row.style.backgroundColor = '#e8e8e8'; });
+      row.addEventListener('mouseleave', ()=>{ row.style.backgroundColor = isAssigned ? '#f0f0f0' : '#fff'; });
+      const checkmark = document.createElement('span'); checkmark.style.width='16px'; checkmark.style.marginRight='10px'; checkmark.style.display='inline-block'; checkmark.textContent = isAssigned ? '✓' : ''; checkmark.style.fontWeight='bold'; checkmark.style.color=t.color || '#999';
+      const colorDot = document.createElement('span'); colorDot.style.width='10px'; colorDot.style.height='10px'; colorDot.style.borderRadius='5px'; colorDot.style.background = t.color || '#999'; colorDot.style.display='inline-block'; colorDot.style.marginRight='8px'; colorDot.style.flexShrink = 0;
+      const lbl = document.createElement('span'); lbl.textContent = t.name; lbl.style.flex = 1;
+      row.appendChild(checkmark); row.appendChild(colorDot); row.appendChild(lbl);
+      row.addEventListener('click', async ()=>{
+        try {
+          if (isAssigned) await unassignTagOnServer(t.id, chatId); else await assignTagOnServer(t.id, chatId);
+          await loadTagsFromServer();
+          if (currentContextMenu) currentContextMenu.remove(); currentContextMenu = null;
+        } catch (err){ console.error(err); alert('Failed to update tag assignment'); }
+      });
+      menu.appendChild(row);
+    }
+  } else {
+    const empty = document.createElement('div'); empty.style.padding='10px 12px'; empty.style.fontSize='13px'; empty.style.color='#999'; empty.textContent = 'No tags yet'; menu.appendChild(empty);
+  }
+  // separator
+  const sep = document.createElement('div'); sep.style.height='1px'; sep.style.background='#ddd'; menu.appendChild(sep);
+  // create new tag action
+  const createRow = document.createElement('div'); createRow.style.padding='10px 12px'; createRow.style.cursor='pointer'; createRow.style.fontSize='13px'; createRow.style.userSelect='none'; createRow.textContent = '+ Create New Tag';
+  createRow.addEventListener('mouseenter', ()=>{ createRow.style.backgroundColor = '#e8e8e8'; });
+  createRow.addEventListener('mouseleave', ()=>{ createRow.style.backgroundColor = '#fff'; });
+  createRow.addEventListener('click', ()=>{
+    if (currentContextMenu) currentContextMenu.remove(); currentContextMenu = null;
+    openTagEditor('', '#ffcc00', async (v)=>{ if (!v) return; const created = await createTagOnServer(v.name, v.color); await assignTagOnServer(created.id, chatId); await loadTagsFromServer(); });
+  });
+  menu.appendChild(createRow);
+
+  document.body.appendChild(menu); currentContextMenu = menu;
+  const removeMenu = ()=>{ if (currentContextMenu && currentContextMenu === menu){ currentContextMenu.remove(); currentContextMenu = null; } document.removeEventListener('click', removeMenu); };
+  setTimeout(()=> document.addEventListener('click', removeMenu), 50);
+}
+
+function renderTagFilterChips(){
+  const header = document.querySelector('header');
+  if (!header) return;
+  let container = document.getElementById('tag-filter-chips');
+  if (!container){ container = document.createElement('div'); container.id = 'tag-filter-chips'; container.style.display='flex'; container.style.gap='6px'; container.style.alignItems='center'; header.appendChild(container); }
+  container.innerHTML = '';
+  if (tags && tags.length > 0) {
+    tags.forEach(t=>{
+      const chip = document.createElement('button'); chip.className='tag-chip'; chip.textContent = t.name; chip.style.border = '1px solid #ddd'; chip.style.background = selectedTagFilters.has(String(t.id)) ? t.color : '#fff'; chip.style.color = selectedTagFilters.has(String(t.id)) ? '#000' : '#000'; chip.style.padding='4px 8px'; chip.style.borderRadius='12px';
+      chip.addEventListener('click', ()=>{ if (selectedTagFilters.has(String(t.id))) selectedTagFilters.delete(String(t.id)); else selectedTagFilters.add(String(t.id)); renderTagFilterChips(); renderChats(); });
+      container.appendChild(chip);
+    });
+    // show 'All Chats' button only when filters are active
+    if (selectedTagFilters.size > 0) {
+      const allBtn = document.createElement('button');
+      allBtn.textContent = 'All Chats';
+      allBtn.title = 'Show all chats';
+      allBtn.className = 'qr-btn';
+      allBtn.addEventListener('click', ()=>{ selectedTagFilters.clear(); renderTagFilterChips(); renderChats(); });
+      container.appendChild(allBtn);
+    }
+  }
+  // tags settings toggle (always show)
+  const settingsBtn = document.createElement('button'); settingsBtn.textContent='Tags ⚙'; settingsBtn.className='qr-btn'; settingsBtn.addEventListener('click', ()=>{ tagsSettingsOpen = !tagsSettingsOpen; renderTagsSettings(); });
+  container.appendChild(settingsBtn);
+}
+
+function renderTagsSettings(){
+  let panel = document.getElementById('tags-settings-panel');
+  if (!panel){ panel = document.createElement('div'); panel.id = 'tags-settings-panel'; panel.style.border = '1px solid #ddd'; panel.style.padding = '8px'; panel.style.marginTop = '8px'; panel.style.background = '#fff'; const header = document.querySelector('header'); if (header) header.parentNode.insertBefore(panel, header.nextSibling); else document.body.appendChild(panel); }
+  if (!tagsSettingsOpen){ panel.style.display = 'none'; return; }
+  panel.style.display = 'block'; panel.innerHTML = '';
+  const titleRow = document.createElement('div'); titleRow.style.display='flex'; titleRow.style.alignItems='center'; titleRow.style.justifyContent='space-between';
+  const title = document.createElement('div'); title.style.fontWeight='bold'; title.textContent = 'Tags Settings';
+  const toolbar = document.createElement('div'); toolbar.style.display='flex'; toolbar.style.gap='8px';
+  const exportBtn = document.createElement('button'); exportBtn.className='qr-btn'; exportBtn.textContent='Export';
+  exportBtn.addEventListener('click', async ()=>{ try { const res = await fetch('/api/tags/export'); if (!res.ok) { statusEl.textContent='Export failed'; return; } const js = await res.json(); const blob = new Blob([JSON.stringify(js, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `tags-${Date.now()}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); statusEl.textContent='Exported tags'; } catch (err){ console.error(err); statusEl.textContent='Export failed'; } });
+  const importBtn = document.createElement('button'); importBtn.className='qr-btn'; importBtn.textContent='Import';
+  let importInput = document.getElementById('tags-import-input'); if (!importInput){ importInput = document.createElement('input'); importInput.type='file'; importInput.id='tags-import-input'; importInput.accept='.json,application/json'; importInput.style.display='none'; document.body.appendChild(importInput); }
+  importBtn.addEventListener('click', ()=>{ importInput.value=''; importInput.click(); });
+  importInput.addEventListener('change', async (ev)=>{ const f = ev.target.files && ev.target.files[0]; if (!f) return; try { const txt = await f.text(); const parsed = JSON.parse(txt); const replace = confirm('Replace existing tags? OK = replace, Cancel = append'); const res = await fetch('/api/tags/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tags: parsed.tags || parsed, assignments: parsed.assignments || parsed.assignments || [], replace }) }); if (!res.ok) { statusEl.textContent='Import failed'; return; } const result = await res.json(); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); statusEl.textContent='Imported tags'; if (result && result.assignments) { const a = result.assignments; alert(`Tags Import Report:\n\nTags imported: ${result.imported || 0}\n\nAssignments:\n• Total: ${a.total || 0}\n• Imported: ${a.imported || 0}\n• Skipped (duplicates): ${a.skipped || 0}\n• Failed: ${a.failed || 0}`); } } catch (err){ console.error(err); statusEl.textContent='Import failed'; } });
+  toolbar.appendChild(exportBtn); toolbar.appendChild(importBtn);
+  titleRow.appendChild(title); titleRow.appendChild(toolbar); panel.appendChild(titleRow);
+  const createRow = document.createElement('div'); createRow.style.marginTop='8px'; const createBtn = document.createElement('button'); createBtn.textContent='Create Tag'; createBtn.className='qr-btn'; createBtn.addEventListener('click', ()=>{ openTagEditor('', '#ffcc00', async (v)=>{ if (!v) return; await createTagOnServer(v.name, v.color); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); }); }); createRow.appendChild(createBtn); panel.appendChild(createRow);
+  if (!tags || tags.length === 0){ const empty = document.createElement('div'); empty.style.marginTop='8px'; empty.textContent='No tags defined.'; panel.appendChild(empty); return; }
+  tags.forEach(t=>{ const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.marginTop='6px'; const label = document.createElement('div'); label.style.flex='1'; label.textContent = t.name; const color = document.createElement('div'); color.style.width='24px'; color.style.height='16px'; color.style.background = t.color; color.style.border='1px solid #ccc'; const edit = document.createElement('button'); edit.className='qr-btn'; edit.textContent='Edit'; edit.addEventListener('click', ()=>{ openTagEditor(t.name, t.color, async (v)=>{ if (!v) return; await updateTagOnServer(t.id, v.name, v.color); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); }); }); const del = document.createElement('button'); del.className='qr-btn'; del.textContent='Delete'; del.addEventListener('click', async ()=>{ try { const countRes = await fetch(`/api/tags/${t.id}/count`); if (!countRes.ok) throw new Error('Failed to get count'); const countData = await countRes.json(); const chatCount = countData.count || 0; const msg = chatCount > 0 ? `Delete tag "${t.name}"?\n\nThis tag is assigned to ${chatCount} chat${chatCount !== 1 ? 's' : ''}. Deleting it will remove the tag from these chats.` : `Delete tag "${t.name}"?`; if (!confirm(msg)) return; await deleteTagOnServer(t.id); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); } catch (err) { console.error(err); alert('Failed to delete tag'); } }); row.appendChild(label); row.appendChild(color); row.appendChild(edit); row.appendChild(del); panel.appendChild(row); });
 }
 
 function getSelectedChatIds(){

@@ -224,6 +224,34 @@ function rowsFromExec(execResult){
   });
 }
 
+// Helper: extract normalized phone number from WhatsApp chat_id (e.g., "1234567890@c.us" -> "1234567890")
+// Returns null for group chats (format: xxxxx@g.us or xxxxx-xxxxx@g.us)
+function extractPhoneFromChatId(chatId){
+  if (!chatId) return null;
+  const str = String(chatId);
+  // detect group chat: contains '@g.us' or '@broadcast' or contains '-' before '@'
+  if (str.includes('@g.us') || str.includes('@broadcast') || str.includes('@newsletter')) return null;
+  // split on '@' and take first part (phone number portion)
+  const parts = str.split('@');
+  if (parts.length === 0) return null;
+  const phone = parts[0];
+  // if phone part contains '-', it's likely a group ID, skip
+  if (phone.includes('-')) return null;
+  // normalize: keep only digits and leading '+'
+  return normalizePhone(phone);
+}
+
+// Helper: normalize phone number to unified format (digits + leading '+' if present)
+function normalizePhone(phone){
+  if (!phone) return null;
+  const str = String(phone).trim();
+  // keep leading '+' if present, then only digits
+  const hasPlus = str.startsWith('+');
+  const digits = str.replace(/[^0-9]/g, '');
+  if (!digits) return null;
+  return hasPlus ? '+' + digits : digits;
+}
+
 async function initSqlite(){
   try {
     SQL = await initSqlJs();
@@ -239,6 +267,31 @@ async function initSqlite(){
   }
   // ensure table exists
   sqliteDb.run("CREATE TABLE IF NOT EXISTS quick_replies (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);");
+  // tags tables: tags and assignments to chat ids
+  sqliteDb.run("CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);");
+  sqliteDb.run("CREATE TABLE IF NOT EXISTS tag_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, tag_id INTEGER NOT NULL, chat_id TEXT NOT NULL, phone_number TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);");
+  
+  // Migration: add phone_number column to existing tag_assignments table if it doesn't exist
+  try {
+    // Check if phone_number column exists by attempting to select it
+    sqliteDb.exec("SELECT phone_number FROM tag_assignments LIMIT 1");
+  } catch (err) {
+    // Column doesn't exist, add it
+    if (err.message && err.message.includes('no such column')) {
+      console.log('Migrating tag_assignments table: adding phone_number column...');
+      sqliteDb.run("ALTER TABLE tag_assignments ADD COLUMN phone_number TEXT");
+      // Backfill phone_number from existing chat_id values
+      const existingAssigns = rowsFromExec(sqliteDb.exec("SELECT id, chat_id FROM tag_assignments"));
+      for (const a of existingAssigns) {
+        const phone = extractPhoneFromChatId(a.chat_id);
+        if (phone) {
+          sqliteDb.run(`UPDATE tag_assignments SET phone_number = "${phone}" WHERE id = ${a.id}`);
+        }
+      }
+      console.log(`Migration complete: backfilled ${existingAssigns.length} assignments with phone numbers`);
+    }
+  }
+  
   // persist initial state
   persistDb();
   dbReady = true;
@@ -263,6 +316,241 @@ app.get('/api/quick-replies/export', (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET /api/quick-replies/export error', err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+// --- Tags API ---
+app.get('/api/tags', (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'db not ready' });
+  try {
+    const rows = rowsFromExec(sqliteDb.exec('SELECT id, name, color, created_at FROM tags ORDER BY id'));
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /api/tags error', err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+app.post('/api/tags', (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'db not ready' });
+  const { name, color } = req.body || {};
+  if (!name || !color) return res.status(400).json({ error: 'name and color required' });
+  try {
+    const stmt = sqliteDb.prepare && sqliteDb.prepare('INSERT INTO tags (name, color) VALUES (?, ?)');
+    if (stmt && stmt.run) stmt.run([name, color]); else sqliteDb.run(`INSERT INTO tags (name, color) VALUES ("${name.replace(/"/g,'\\"')}","${color}")`);
+    stmt && stmt.free && stmt.free();
+    persistDb();
+    io.emit('tags_updated');
+    const rows = rowsFromExec(sqliteDb.exec('SELECT id, name, color, created_at FROM tags ORDER BY id'));
+    res.status(201).json(rows[rows.length-1]);
+  } catch (err) {
+    console.error('POST /api/tags error', err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+app.put('/api/tags/:id', (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'db not ready' });
+  const id = Number(req.params.id);
+  const { name, color } = req.body || {};
+  if (!id || !name || !color) return res.status(400).json({ error: 'id,name,color required' });
+  try {
+    sqliteDb.run('UPDATE tags SET name = ?, color = ? WHERE id = ?', [name, color, id]);
+    persistDb();
+    io.emit('tags_updated');
+    const row = rowsFromExec(sqliteDb.exec(`SELECT id, name, color, created_at FROM tags WHERE id = ${id}`))[0];
+    res.json(row);
+  } catch (err) {
+    console.error('PUT /api/tags error', err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+app.delete('/api/tags/:id', (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'db not ready' });
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'id required' });
+  try {
+    sqliteDb.run('DELETE FROM tag_assignments WHERE tag_id = ?', [id]);
+    sqliteDb.run('DELETE FROM tags WHERE id = ?', [id]);
+    persistDb();
+    io.emit('tags_updated');
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/tags error', err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+// get assignment count for a tag
+app.get('/api/tags/:id/count', (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'db not ready' });
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'id required' });
+  try {
+    const result = rowsFromExec(sqliteDb.exec(`SELECT COUNT(*) as count FROM tag_assignments WHERE tag_id = ${id}`));
+    const count = result && result[0] ? result[0].count : 0;
+    res.json({ tagId: id, count });
+  } catch (err) {
+    console.error('GET /api/tags/:id/count error', err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+// assign/unassign tags to chatId
+app.post('/api/tags/assign', (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'db not ready' });
+  const { tagId, chatId } = req.body || {};
+  if (!tagId || !chatId) return res.status(400).json({ error: 'tagId and chatId required' });
+  try {
+    // check for existing assignment (deduplicate)
+    const existing = rowsFromExec(sqliteDb.exec(`SELECT id FROM tag_assignments WHERE tag_id = ${tagId} AND chat_id = "${String(chatId).replace(/"/g, '\\"')}"`));
+    if (existing && existing.length > 0) {
+      // already assigned, return success without inserting
+      res.json({ ok: true, existing: true });
+      return;
+    }
+    // extract normalized phone from chatId (format: 1234567890@c.us or similar)
+    const phoneNumber = extractPhoneFromChatId(chatId);
+    sqliteDb.run('INSERT INTO tag_assignments (tag_id, chat_id, phone_number) VALUES (?, ?, ?)', [tagId, chatId, phoneNumber]);
+    persistDb();
+    io.emit('tags_updated');
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('POST /api/tags/assign error', err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+app.post('/api/tags/unassign', (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'db not ready' });
+  const { tagId, chatId } = req.body || {};
+  if (!tagId || !chatId) return res.status(400).json({ error: 'tagId and chatId required' });
+  try {
+    sqliteDb.run('DELETE FROM tag_assignments WHERE tag_id = ? AND chat_id = ?', [tagId, chatId]);
+    persistDb();
+    io.emit('tags_updated');
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('POST /api/tags/unassign error', err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+// export tags and assignments
+app.get('/api/tags/export', (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'db not ready' });
+  try {
+    const tags = rowsFromExec(sqliteDb.exec('SELECT id, name, color FROM tags ORDER BY id'));
+    const assigns = rowsFromExec(sqliteDb.exec('SELECT tag_id, chat_id, phone_number FROM tag_assignments'));
+    res.json({ tags, assignments: assigns });
+  } catch (err) {
+    console.error('GET /api/tags/export error', err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+// import tags (replace or append)
+app.post('/api/tags/import', (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'db not ready' });
+  const body = req.body || {};
+  const tags = Array.isArray(body.tags) ? body.tags : [];
+  const assigns = Array.isArray(body.assignments) ? body.assignments : [];
+  const replace = !!body.replace;
+  if (!tags.length) return res.status(400).json({ error: 'tags required' });
+  try {
+    // We'll insert tags one-by-one and build a mapping from imported id -> new id
+    const idMap = {}; // oldId -> newId
+    const nameMap = {}; // name -> newId (for assignments that reference names)
+
+    if (replace) {
+      sqliteDb.run('DELETE FROM tag_assignments');
+      sqliteDb.run('DELETE FROM tags');
+    }
+
+    const insert = sqliteDb.prepare && sqliteDb.prepare('INSERT INTO tags (name, color) VALUES (?, ?)');
+    for (const t of tags){
+      const name = (t && (t.name || t.text)) ? String(t.name || t.text) : '';
+      const color = (t && t.color) ? String(t.color) : '#AAAAAA';
+      if (!name) continue;
+      if (insert && insert.run) insert.run([name, color]); else sqliteDb.run('INSERT INTO tags (name, color) VALUES ("'+name.replace(/"/g,'\\"')+'","'+color+'")');
+      // get new id
+      const last = rowsFromExec(sqliteDb.exec('SELECT last_insert_rowid() AS id'))[0];
+      const newId = last && last.id ? last.id : null;
+      // map old id -> newId if old id provided
+      const oldId = t && (t.id || t.tag_id || t.tagId || null);
+      if (oldId != null && newId != null) idMap[String(oldId)] = newId;
+      // also map by name for fallback
+      if (newId != null) nameMap[String(name)] = newId;
+    }
+    insert && insert.free && insert.free();
+
+    // assignments: remap incoming tag ids to newly created ids where possible
+    let assignmentsImported = 0;
+    let assignmentsSkipped = 0;
+    let assignmentsFailed = 0;
+    if (assigns && assigns.length){
+      for (const a of assigns){
+        // incoming may include tag_id, tagId, or tag_name; likewise chat id keys vary
+        const incomingTid = a.tag_id != null ? a.tag_id : (a.tagId != null ? a.tagId : null);
+        const incomingTagName = a.tag_name || a.tag || null;
+        const incomingChat = a.chat_id || a.chatId || a.chat || null;
+        const incomingPhone = a.phone_number || a.phoneNumber || a.phone || null;
+
+        // determine mapped tag id
+        let mappedTid = null;
+        if (incomingTid != null && idMap.hasOwnProperty(String(incomingTid))) mappedTid = idMap[String(incomingTid)];
+        else if (incomingTagName && nameMap.hasOwnProperty(String(incomingTagName))) mappedTid = nameMap[String(incomingTagName)];
+        else if (incomingTid != null) mappedTid = incomingTid; // fallback: assume ids align (best-effort)
+
+        if (!mappedTid) { assignmentsFailed++; continue; }
+
+        // resolve chatId: try direct chat_id first, then fallback to phone lookup
+        let chatId = null;
+        let phoneNumber = null;
+
+        if (incomingChat) {
+          chatId = String(incomingChat);
+          // normalize: if no '@' assume phone and append @c.us
+          if (chatId.indexOf('@') === -1) {
+            const normalized = chatId.replace(/[^0-9+]/g,'');
+            if (normalized.length > 0) chatId = normalized + '@c.us';
+          }
+          phoneNumber = extractPhoneFromChatId(chatId);
+        } else if (incomingPhone) {
+          // fallback: incoming phone number only — try to match existing assignment by phone or construct chatId
+          phoneNumber = normalizePhone(incomingPhone);
+          // attempt to find existing assignment with this phone to get chatId
+          const existing = rowsFromExec(sqliteDb.exec(`SELECT chat_id FROM tag_assignments WHERE phone_number = "${phoneNumber}" LIMIT 1`));
+          if (existing && existing.length > 0) {
+            chatId = existing[0].chat_id;
+          } else {
+            // construct chatId from phone
+            chatId = phoneNumber + '@c.us';
+          }
+        }
+
+        if (!chatId) { assignmentsFailed++; continue; }
+
+        // deduplicate: check if this tag+chat assignment already exists
+        const existingAssign = rowsFromExec(sqliteDb.exec(`SELECT id FROM tag_assignments WHERE tag_id = ${mappedTid} AND chat_id = "${String(chatId).replace(/"/g, '\\"')}"`));
+        if (existingAssign && existingAssign.length > 0) {
+          assignmentsSkipped++;
+          continue; // skip duplicate
+        }
+
+        // insert assignment with phone fallback
+        sqliteDb.run('INSERT INTO tag_assignments (tag_id, chat_id, phone_number) VALUES (?, ?, ?)', [mappedTid, chatId, phoneNumber]);
+        assignmentsImported++;
+      }
+    }
+
+    persistDb();
+    io.emit('tags_updated');
+    res.json({ ok: true, imported: tags.length, assignments: { total: assigns.length, imported: assignmentsImported, skipped: assignmentsSkipped, failed: assignmentsFailed } });
+  } catch (err) {
+    console.error('POST /api/tags/import error', err);
     res.status(500).json({ error: 'internal' });
   }
 });
