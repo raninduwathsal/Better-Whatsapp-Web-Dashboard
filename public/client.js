@@ -18,6 +18,7 @@ let tags = []; // {id, name, color}
 let tagAssignments = {}; // chatId -> [tagId]
 let selectedTagFilters = new Set();
 let tagsSettingsOpen = false;
+let tagsImportHandlerAttached = false;
 
 // quick replies (server-backed)
 let quickReplies = []; // {id, text, created_at}
@@ -611,9 +612,48 @@ function renderTagsSettings(){
   const exportBtn = document.createElement('button'); exportBtn.className='qr-btn'; exportBtn.textContent='Export';
   exportBtn.addEventListener('click', async ()=>{ try { const res = await fetch('/api/tags/export'); if (!res.ok) { statusEl.textContent='Export failed'; return; } const js = await res.json(); const blob = new Blob([JSON.stringify(js, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `tags-${Date.now()}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); statusEl.textContent='Exported tags'; } catch (err){ console.error(err); statusEl.textContent='Export failed'; } });
   const importBtn = document.createElement('button'); importBtn.className='qr-btn'; importBtn.textContent='Import';
-  let importInput = document.getElementById('tags-import-input'); if (!importInput){ importInput = document.createElement('input'); importInput.type='file'; importInput.id='tags-import-input'; importInput.accept='.json,application/json'; importInput.style.display='none'; document.body.appendChild(importInput); }
+  let importInput = document.getElementById('tags-import-input'); 
+  if (!importInput){ 
+    importInput = document.createElement('input'); 
+    importInput.type='file'; 
+    importInput.id='tags-import-input'; 
+    importInput.accept='.json,application/json'; 
+    importInput.style.display='none'; 
+    document.body.appendChild(importInput); 
+  }
   importBtn.addEventListener('click', ()=>{ importInput.value=''; importInput.click(); });
-  importInput.addEventListener('change', async (ev)=>{ const f = ev.target.files && ev.target.files[0]; if (!f) return; try { const txt = await f.text(); const parsed = JSON.parse(txt); const replace = confirm('Replace existing tags? OK = replace, Cancel = append'); const res = await fetch('/api/tags/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tags: parsed.tags || parsed, assignments: parsed.assignments || parsed.assignments || [], replace }) }); if (!res.ok) { statusEl.textContent='Import failed'; return; } const result = await res.json(); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); statusEl.textContent='Imported tags'; if (result && result.assignments) { const a = result.assignments; alert(`Tags Import Report:\n\nTags imported: ${result.imported || 0}\n\nAssignments:\n• Total: ${a.total || 0}\n• Imported: ${a.imported || 0}\n• Skipped (duplicates): ${a.skipped || 0}\n• Failed: ${a.failed || 0}`); } } catch (err){ console.error(err); statusEl.textContent='Import failed'; } });
+  
+  // Attach the change handler only once
+  if (!tagsImportHandlerAttached) {
+    tagsImportHandlerAttached = true;
+    importInput.addEventListener('change', async (ev)=>{ 
+      const f = ev.target.files && ev.target.files[0]; 
+      if (!f) return; 
+      try { 
+        const txt = await f.text(); 
+        const parsed = JSON.parse(txt); 
+        const replace = confirm('Replace existing tags? OK = replace, Cancel = append'); 
+        const res = await fetch('/api/tags/import', { 
+          method: 'POST', 
+          headers: {'Content-Type':'application/json'}, 
+          body: JSON.stringify({ tags: parsed.tags || parsed, assignments: parsed.assignments || parsed.assignments || [], replace }) 
+        }); 
+        if (!res.ok) { statusEl.textContent='Import failed'; return; } 
+        const result = await res.json(); 
+        await loadTagsFromServer(); 
+        renderTagFilterChips(); 
+        renderTagsSettings(); 
+        statusEl.textContent='Imported tags'; 
+        if (result && result.assignments) { 
+          const a = result.assignments; 
+          alert(`Tags Import Report:\n\nTags imported: ${result.imported || 0}\n\nAssignments:\n• Total: ${a.total || 0}\n• Imported: ${a.imported || 0}\n• Skipped (duplicates): ${a.skipped || 0}\n• Failed: ${a.failed || 0}`); 
+        } 
+      } catch (err){ 
+        console.error(err); 
+        statusEl.textContent='Import failed'; 
+      } 
+    });
+  }
   toolbar.appendChild(exportBtn); toolbar.appendChild(importBtn);
   titleRow.appendChild(title); titleRow.appendChild(toolbar); panel.appendChild(titleRow);
   const createRow = document.createElement('div'); createRow.style.marginTop='8px'; const createBtn = document.createElement('button'); createBtn.textContent='Create Tag'; createBtn.className='qr-btn'; createBtn.addEventListener('click', ()=>{ openTagEditor('', '#ffcc00', async (v)=>{ if (!v) return; await createTagOnServer(v.name, v.color); await loadTagsFromServer(); renderTagFilterChips(); renderTagsSettings(); }); }); createRow.appendChild(createBtn); panel.appendChild(createRow);
