@@ -12,6 +12,8 @@ let chats = []; // array of chat objects from server
 const pinned = new Set();
 // selection supports multi-select (ctrl/cmd click)
 const selectedChats = new Set();
+// notes counts map: chatId -> count
+let notesCounts = {};
 
 // tags state
 let tags = []; // {id, name, color}
@@ -63,6 +65,22 @@ loadQuickRepliesFromServer();
 // tags
 socket.on('tags_updated', ()=> loadTagsFromServer());
 loadTagsFromServer();
+// ensure central notes settings button
+ensureNotesSettingsButton();
+
+// notes counts loader
+async function loadNotesCountsFromServer(){
+  try {
+    const res = await fetch('/api/notes/counts');
+    if (!res.ok) throw new Error('failed');
+    const rows = await res.json();
+    notesCounts = {};
+    for (const r of rows) notesCounts[r.chatId] = Number(r.count) || 0;
+  } catch (err){ console.error('Failed to load note counts', err); notesCounts = {}; }
+  renderChats();
+}
+socket.on('notes_updated', ()=> loadNotesCountsFromServer());
+loadNotesCountsFromServer();
 
 
 socket.on('connect', () => {
@@ -147,6 +165,16 @@ function renderChats(){
     const title = document.createElement('strong');
     title.textContent = c.name || '';
     left.appendChild(title);
+    // show notes badge if any
+    const noteCount = notesCounts[c.chatId] || 0;
+    if (noteCount > 0) {
+      const noteBadge = document.createElement('span');
+      noteBadge.textContent = ` 📝${noteCount}`;
+      noteBadge.style.marginLeft = '8px';
+      noteBadge.style.fontSize = '12px';
+      noteBadge.title = `${noteCount} note${noteCount !== 1 ? 's' : ''}`;
+      left.appendChild(noteBadge);
+    }
     // tag badges container
     const badgeWrap = document.createElement('span'); badgeWrap.className = 'tag-badges'; badgeWrap.style.marginLeft='8px';
     const assignedIds = tagAssignments[c.chatId] || [];
@@ -247,6 +275,23 @@ function renderChats(){
       e.preventDefault();
       e.stopPropagation();
       openTagContextMenu(e.pageX, e.pageY, c.chatId);
+    });
+
+    // hover preview: show notes preview bubble after 1.5s hover
+    el.addEventListener('mouseenter', (ev)=>{
+      // start timer to show preview
+      if (el._noteTimer) clearTimeout(el._noteTimer);
+      el._noteTimer = setTimeout(()=>{
+        showNotesPreviewBubble(c.chatId, el);
+      }, 1500);
+    });
+    el.addEventListener('mouseleave', (ev)=>{
+      // cancel timer
+      if (el._noteTimer) { clearTimeout(el._noteTimer); el._noteTimer = null; }
+      // if bubble exists, schedule removal shortly to allow moving to bubble
+      if (el._noteBubble){
+        setTimeout(()=>{ if (el._noteBubble && !el._noteBubble.matches(':hover')) { hideNotesPreviewBubble(el); } }, 150);
+      }
     });
 
       // double-click to open full chat view
@@ -525,6 +570,213 @@ function openTagEditor(initialName, initialColor, onSave){
   saveBtn.addEventListener('click', ()=> close({ name: nameInput.value.trim(), color: colorInput.value }));
 }
 
+// ------------------ Notes client functions ------------------
+const NOTES_API = '/api/notes';
+
+async function loadNotesForChat(chatId){
+  try {
+    const res = await fetch(`${NOTES_API}?chatId=${encodeURIComponent(chatId)}`);
+    if (!res.ok) throw new Error('failed to load notes');
+    return await res.json();
+  } catch (err){
+    console.error('Failed to load notes', err);
+    return [];
+  }
+}
+
+async function createNoteOnServer(chatId, text){
+  const res = await fetch(NOTES_API, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ chatId, text }) });
+  if (!res.ok) throw new Error('create note failed');
+  return await res.json();
+}
+
+async function updateNoteOnServer(id, text){
+  const res = await fetch(`${NOTES_API}/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ text }) });
+  if (!res.ok) throw new Error('update note failed');
+  return await res.json();
+}
+
+async function deleteNoteOnServer(id){
+  const res = await fetch(`${NOTES_API}/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('delete note failed');
+  return await res.json();
+}
+
+function openNotesModal(chatId, title){
+  const modal = document.createElement('div'); modal.className='modal';
+  const panel = document.createElement('div'); panel.className='panel';
+  const header = document.createElement('div'); header.className='header';
+  const hTitle = document.createElement('div'); hTitle.textContent = `Notes — ${title}`;
+  const closeBtn = document.createElement('button'); closeBtn.textContent='Close';
+  // export/import controls
+  const exportBtn = document.createElement('button'); exportBtn.className='qr-btn'; exportBtn.textContent='Export';
+  const importBtn = document.createElement('button'); importBtn.className='qr-btn'; importBtn.textContent='Import';
+  // hidden file input for import
+  let notesImportInput = document.getElementById('notes-import-input');
+  if (!notesImportInput) { notesImportInput = document.createElement('input'); notesImportInput.type = 'file'; notesImportInput.id = 'notes-import-input'; notesImportInput.accept = '.json,application/json'; notesImportInput.style.display = 'none'; document.body.appendChild(notesImportInput); }
+
+  exportBtn.addEventListener('click', async ()=>{
+    try {
+      const res = await fetch(`/api/notes/export?chatId=${encodeURIComponent(chatId)}`);
+      if (!res.ok) { statusEl.textContent = 'Export failed'; return; }
+      const rows = await res.json();
+      const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `notes-${chatId || 'all'}-${Date.now()}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      statusEl.textContent = 'Exported notes';
+    } catch (err) { console.error(err); statusEl.textContent = 'Export failed'; }
+  });
+
+  importBtn.addEventListener('click', ()=>{ notesImportInput.value = ''; notesImportInput.click(); });
+  notesImportInput.addEventListener('change', async (ev)=>{
+    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+    try {
+      const txt = await f.text();
+      const parsed = JSON.parse(txt);
+      // expect array or object { notes: [...] }
+      const items = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.notes) ? parsed.notes : []);
+      if (!items.length) { statusEl.textContent = 'No notes to import'; return; }
+      const append = true; // default to append as requested
+      const res = await fetch('/api/notes/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ notes: items, replace: !append }) });
+      if (!res.ok) { statusEl.textContent = 'Import failed'; return; }
+      const js = await res.json();
+      statusEl.textContent = `Imported notes: ${js.imported || 0}`;
+      await loadNotesCountsFromServer();
+      await refresh();
+    } catch (err) { console.error(err); statusEl.textContent = 'Import failed'; }
+  });
+
+  header.appendChild(hTitle); header.appendChild(exportBtn); header.appendChild(importBtn); header.appendChild(closeBtn);
+  const body = document.createElement('div'); body.className='body';
+  const composer = document.createElement('div'); composer.className='composer';
+  const input = document.createElement('textarea'); input.placeholder='Type note (Ctrl+Enter to save)'; input.style.width='100%'; input.style.height='64px';
+  composer.appendChild(input);
+  const saveRow = document.createElement('div'); saveRow.style.display='flex'; saveRow.style.justifyContent='flex-end'; saveRow.style.marginTop='6px';
+  const saveBtn = document.createElement('button'); saveBtn.className='qr-btn primary'; saveBtn.textContent='Add Note';
+  saveRow.appendChild(saveBtn);
+  panel.appendChild(header); panel.appendChild(body); panel.appendChild(composer); panel.appendChild(saveRow); modal.appendChild(panel); document.body.appendChild(modal);
+
+  closeBtn.addEventListener('click', ()=>{ document.body.removeChild(modal); });
+
+  async function refresh(){
+    body.innerHTML = '<em>Loading...</em>';
+    const notes = await loadNotesForChat(chatId);
+    body.innerHTML = '';
+    if (!notes || notes.length === 0){ body.innerHTML = '<div style="color:#666">No notes</div>'; return; }
+    for (const n of notes){
+      const row = document.createElement('div'); row.style.display='flex'; row.style.flexDirection='column'; row.style.gap='6px'; row.style.marginBottom='12px'; row.style.padding='8px'; row.style.border='1px solid #eee'; row.style.borderRadius='6px'; row.style.background='#fff';
+      const txt = document.createElement('div'); txt.style.whiteSpace='pre-wrap'; txt.style.fontSize='13px'; txt.textContent = n.text;
+      const metaRow = document.createElement('div'); metaRow.style.display='flex'; metaRow.style.justifyContent='space-between'; metaRow.style.alignItems='center';
+      const meta = document.createElement('div'); meta.style.fontSize='11px'; meta.style.color='#666'; meta.textContent = n.updatedAt ? `Updated ${new Date(n.updatedAt).toLocaleString()}` : (n.createdAt ? new Date(n.createdAt).toLocaleString() : '');
+      const actions = document.createElement('div');
+      const edit = document.createElement('button'); edit.className='qr-btn'; edit.textContent='Edit';
+      const del = document.createElement('button'); del.className='qr-btn'; del.textContent='Delete';
+      edit.addEventListener('click', ()=>{
+        const emodal = document.createElement('div'); emodal.className='modal';
+        const epanel = document.createElement('div'); epanel.className='panel';
+        const eheader = document.createElement('div'); eheader.className='header'; const eh = document.createElement('div'); eh.textContent='Edit Note'; const eclose = document.createElement('button'); eclose.textContent='Cancel'; eheader.appendChild(eh); eheader.appendChild(eclose);
+        const ebody = document.createElement('div'); ebody.className='body';
+        const ta = document.createElement('textarea'); ta.style.width='100%'; ta.style.height='160px'; ta.value = n.text || '';
+        ebody.appendChild(ta);
+        const ecomp = document.createElement('div'); ecomp.className='composer'; const esave = document.createElement('button'); esave.className='qr-btn primary'; esave.textContent='Save'; const ecancel = document.createElement('button'); ecancel.textContent='Cancel'; ecomp.appendChild(ecancel); ecomp.appendChild(esave);
+        epanel.appendChild(eheader); epanel.appendChild(ebody); epanel.appendChild(ecomp); emodal.appendChild(epanel); document.body.appendChild(emodal);
+        eclose.addEventListener('click', ()=> document.body.removeChild(emodal)); ecancel.addEventListener('click', ()=> document.body.removeChild(emodal));
+        esave.addEventListener('click', async ()=>{
+          const v = ta.value && ta.value.trim();
+          if (!v) { alert('Note cannot be empty'); return; }
+          try { await updateNoteOnServer(n.id, v); document.body.removeChild(emodal); await refresh(); statusEl.textContent = 'Note updated'; await loadNotesCountsFromServer(); } catch (err){ console.error(err); alert('Failed to update'); }
+        });
+      });
+      del.addEventListener('click', ()=>{
+        if (!confirm('Delete this note?')) return;
+        deleteNoteOnServer(n.id).then(async ()=>{ await refresh(); await loadNotesCountsFromServer(); }).catch(err=>{ console.error(err); alert('Failed to delete'); });
+      });
+      actions.appendChild(edit); actions.appendChild(del);
+      metaRow.appendChild(meta); metaRow.appendChild(actions);
+      row.appendChild(txt); row.appendChild(metaRow);
+      body.appendChild(row);
+    }
+  }
+
+  saveBtn.addEventListener('click', async ()=>{
+    const v = input.value && input.value.trim();
+    if (!v) return; try { await createNoteOnServer(chatId, v); input.value = ''; await refresh(); statusEl.textContent = 'Note added'; await loadNotesCountsFromServer(); } catch (err){ console.error(err); statusEl.textContent='Failed to add note'; }
+  });
+
+  input.addEventListener('keydown', async (e)=>{ if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { saveBtn.click(); } });
+
+  refresh();
+}
+
+// Show a floating notes preview bubble near an anchor element.
+async function showNotesPreviewBubble(chatId, anchorEl){
+  // Avoid duplicate
+  if (anchorEl._noteBubble) return;
+  const rect = anchorEl.getBoundingClientRect();
+  const bubble = document.createElement('div');
+  bubble.className = 'context-menu';
+  bubble.style.position = 'fixed';
+  // try to place to the right, fallback to left when off-screen
+  const width = 320;
+  let left = rect.right + 8;
+  if (left + width > window.innerWidth) left = Math.max(8, rect.left - width - 8);
+  let top = rect.top;
+  if (top + 200 > window.innerHeight) top = Math.max(8, window.innerHeight - 220);
+  bubble.style.left = left + 'px';
+  bubble.style.top = top + 'px';
+  bubble.style.width = width + 'px';
+  bubble.style.maxHeight = '220px';
+  bubble.style.overflowY = 'auto';
+  bubble.style.background = '#fff';
+  bubble.style.border = '1px solid #ccc';
+  bubble.style.borderRadius = '8px';
+  bubble.style.padding = '8px';
+  bubble.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)';
+  bubble.style.zIndex = 99999;
+
+  const hdr = document.createElement('div'); hdr.style.fontWeight='bold'; hdr.style.marginBottom='6px'; hdr.textContent = 'Notes Preview';
+  bubble.appendChild(hdr);
+
+  const notes = await loadNotesForChat(chatId);
+  if (!notes || notes.length === 0){
+    const empty = document.createElement('div'); empty.style.color = '#666'; empty.textContent = 'No notes'; bubble.appendChild(empty);
+  } else {
+    const list = document.createElement('div'); list.style.display='flex'; list.style.flexDirection='column'; list.style.gap='8px';
+    const showCount = Math.min(3, notes.length);
+    for (let i=0;i<showCount;i++){
+      const n = notes[i];
+      const item = document.createElement('div'); item.style.padding='8px'; item.style.border='1px solid #f0f0f0'; item.style.borderRadius='6px'; item.style.background='#fff';
+      const t = document.createElement('div'); t.style.whiteSpace='pre-wrap'; t.style.fontSize='13px'; t.textContent = n.text;
+      const meta = document.createElement('div'); meta.style.fontSize='11px'; meta.style.color='#666'; meta.style.marginTop='6px'; meta.textContent = n.updatedAt ? `Updated ${new Date(n.updatedAt).toLocaleString()}` : (n.createdAt ? new Date(n.createdAt).toLocaleString() : '');
+      item.appendChild(t); item.appendChild(meta);
+      list.appendChild(item);
+    }
+    if (notes.length > 3){
+      // make list scrollable (bubble already has overflow)
+      const more = document.createElement('div'); more.style.fontSize='12px'; more.style.color='#666'; more.style.marginTop='6px'; more.textContent = `${notes.length - 3} more... scroll to see`;
+      list.appendChild(more);
+    }
+    bubble.appendChild(list);
+  }
+
+  // attach hover behavior: when mouse leaves both anchor and bubble, remove
+  let hovered = false;
+  bubble.addEventListener('mouseenter', ()=>{ hovered = true; });
+  bubble.addEventListener('mouseleave', ()=>{ hovered = false; setTimeout(()=>{ if (!hovered && anchorEl._noteBubble){ anchorEl._noteBubble.remove(); anchorEl._noteBubble = null; } }, 120); });
+
+  document.body.appendChild(bubble);
+  anchorEl._noteBubble = bubble;
+}
+
+// Remove preview bubble if exists for element
+function hideNotesPreviewBubble(anchorEl){
+  if (!anchorEl) return;
+  if (anchorEl._noteBubble){
+    try { anchorEl._noteBubble.remove(); } catch (e) {}
+    anchorEl._noteBubble = null;
+  }
+}
+
 // small context menu implementation
 let currentContextMenu = null;
 function openTagContextMenu(x, y, chatId){
@@ -569,6 +821,29 @@ function openTagContextMenu(x, y, chatId){
   });
   menu.appendChild(createRow);
 
+  // Notes actions
+  const notesTitle = document.createElement('div'); notesTitle.style.padding='8px 12px'; notesTitle.style.fontSize='13px'; notesTitle.style.color='#666'; notesTitle.style.borderTop='1px solid #eee'; notesTitle.textContent = 'Notes'; menu.appendChild(notesTitle);
+  const addNoteRow = document.createElement('div'); addNoteRow.style.padding='10px 12px'; addNoteRow.style.cursor='pointer'; addNoteRow.style.fontSize='13px'; addNoteRow.style.userSelect='none'; addNoteRow.textContent = '+ Add Note';
+  addNoteRow.addEventListener('mouseenter', ()=>{ addNoteRow.style.backgroundColor = '#e8e8e8'; });
+  addNoteRow.addEventListener('mouseleave', ()=>{ addNoteRow.style.backgroundColor = '#fff'; });
+  addNoteRow.addEventListener('click', ()=>{
+    if (currentContextMenu) currentContextMenu.remove(); currentContextMenu = null;
+    const c = chats.find(x=>x.chatId === chatId);
+    const title = c ? (c.name || c.chatId) : chatId;
+    openNotesModal(chatId, title);
+  });
+  menu.appendChild(addNoteRow);
+  const viewNotesRow = document.createElement('div'); viewNotesRow.style.padding='10px 12px'; viewNotesRow.style.cursor='pointer'; viewNotesRow.style.fontSize='13px'; viewNotesRow.style.userSelect='none'; viewNotesRow.textContent = 'Edit Notes';
+  viewNotesRow.addEventListener('mouseenter', ()=>{ viewNotesRow.style.backgroundColor = '#e8e8e8'; });
+  viewNotesRow.addEventListener('mouseleave', ()=>{ viewNotesRow.style.backgroundColor = '#fff'; });
+  viewNotesRow.addEventListener('click', ()=>{
+    if (currentContextMenu) currentContextMenu.remove(); currentContextMenu = null;
+    const c = chats.find(x=>x.chatId === chatId);
+    const title = c ? (c.name || c.chatId) : chatId;
+    openNotesModal(chatId, title);
+  });
+  menu.appendChild(viewNotesRow);
+
   document.body.appendChild(menu); currentContextMenu = menu;
   const removeMenu = ()=>{ if (currentContextMenu && currentContextMenu === menu){ currentContextMenu.remove(); currentContextMenu = null; } document.removeEventListener('click', removeMenu); };
   setTimeout(()=> document.addEventListener('click', removeMenu), 50);
@@ -599,6 +874,73 @@ function renderTagFilterChips(){
   // tags settings toggle (always show)
   const settingsBtn = document.createElement('button'); settingsBtn.textContent='Tags ⚙'; settingsBtn.className='qr-btn'; settingsBtn.addEventListener('click', ()=>{ tagsSettingsOpen = !tagsSettingsOpen; renderTagsSettings(); });
   container.appendChild(settingsBtn);
+  // also ensure notes settings button is present in header
+  ensureNotesSettingsButton();
+}
+
+// create a central Notes settings button in the header
+function ensureNotesSettingsButton(){
+  const header = document.querySelector('header');
+  if (!header) return;
+  if (document.getElementById('notes-settings-btn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'notes-settings-btn';
+  btn.className = 'qr-btn';
+  btn.textContent = 'Notes ⚙';
+  btn.addEventListener('click', ()=> openNotesSettingsPanel());
+  header.appendChild(btn);
+}
+
+function openNotesSettingsPanel(){
+  const modal = document.createElement('div'); modal.className='modal';
+  const panel = document.createElement('div'); panel.className='panel';
+  const header = document.createElement('div'); header.className='header';
+  const title = document.createElement('div'); title.textContent = 'Notes Settings';
+  const closeBtn = document.createElement('button'); closeBtn.textContent = 'Close';
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+
+  const body = document.createElement('div'); body.className='body';
+  const exportBtn = document.createElement('button'); exportBtn.className='qr-btn'; exportBtn.textContent = 'Export All Notes';
+  const importBtn = document.createElement('button'); importBtn.className='qr-btn'; importBtn.textContent = 'Import Notes (Append)';
+  const info = document.createElement('div'); info.style.marginTop = '8px'; info.style.color='#666'; info.textContent = 'Export creates a JSON backup of all notes. Import will append notes to matching chats using chatId or phone number fallback.';
+  body.appendChild(exportBtn); body.appendChild(importBtn); body.appendChild(info);
+
+  // hidden input for import
+  let importInput = document.getElementById('notes-import-all-input');
+  if (!importInput){ importInput = document.createElement('input'); importInput.type='file'; importInput.id='notes-import-all-input'; importInput.accept='.json,application/json'; importInput.style.display='none'; document.body.appendChild(importInput); }
+
+  exportBtn.addEventListener('click', async ()=>{
+    try {
+      const res = await fetch('/api/notes/export');
+      if (!res.ok) { statusEl.textContent = 'Export failed'; return; }
+      const rows = await res.json();
+      const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `notes-all-${Date.now()}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      statusEl.textContent = 'Exported all notes';
+    } catch (err){ console.error(err); statusEl.textContent = 'Export failed'; }
+  });
+
+  importBtn.addEventListener('click', ()=>{ importInput.value = ''; importInput.click(); });
+  importInput.addEventListener('change', async (ev)=>{
+    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+    try {
+      const txt = await f.text();
+      const parsed = JSON.parse(txt);
+      const items = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.notes) ? parsed.notes : []);
+      if (!items.length) { statusEl.textContent = 'No notes to import'; return; }
+      // append by default
+      const res = await fetch('/api/notes/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ notes: items, replace: false }) });
+      if (!res.ok) { statusEl.textContent = 'Import failed'; return; }
+      const js = await res.json();
+      statusEl.textContent = `Import: ${js.imported || 0} imported, ${js.failed || 0} failed`;
+      await loadNotesCountsFromServer();
+    } catch (err){ console.error(err); statusEl.textContent = 'Import failed'; }
+  });
+
+  panel.appendChild(header); panel.appendChild(body); modal.appendChild(panel); document.body.appendChild(modal);
+  closeBtn.addEventListener('click', ()=>{ document.body.removeChild(modal); });
 }
 
 function renderTagsSettings(){
