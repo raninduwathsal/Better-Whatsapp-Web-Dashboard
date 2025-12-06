@@ -2,10 +2,10 @@
   "name": "wa-dash-v2",
   "version": "0.1.0",
   "description": "WhatsApp dashboard: scan QR, view messages in a grid, send preset replies via keyboard",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
+    "start": "node index.js",
+    "dev": "node index.js",
     "test-quick-replies": "node test/test_quick_replies.js",
     "test-tags": "node test/test_tags.js",
     "test-notes": "node test/test_notes.js"

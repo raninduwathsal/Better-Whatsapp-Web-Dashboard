@@ -1,0 +1,251 @@
+/**
+ * Context Menu UI Module
+ * Handles right-click context menu for chats
+ */
+
+function openTagContextMenu(x, y, chatId) {
+  if (AppState.currentContextMenu) {
+    AppState.currentContextMenu.remove();
+    AppState.currentContextMenu = null;
+  }
+
+  const menu = document.createElement('div');
+  menu.className = 'context-menu';
+  menu.style.position = 'fixed';
+  menu.style.left = (x) + 'px';
+  menu.style.top = (y) + 'px';
+  menu.style.background = '#fff';
+  menu.style.border = '1px solid #ccc';
+  menu.style.borderRadius = '6px';
+  menu.style.padding = '0';
+  menu.style.zIndex = 9999;
+  menu.style.minWidth = '240px';
+  menu.style.boxShadow = '0 2px 10px rgba(0,0,0,0.2)';
+  menu.style.overflow = 'hidden';
+
+  const title = document.createElement('div');
+  title.style.fontWeight = 'bold';
+  title.style.padding = '10px 12px';
+  title.style.fontSize = '13px';
+  title.style.color = '#666';
+  title.style.borderBottom = '1px solid #eee';
+  title.textContent = 'Tags';
+  menu.appendChild(title);
+
+  // Get Archived tag ID to filter it out
+  const archivedTag = AppState.tags.find(t => t.name === 'Archived' && t.is_system);
+  const archivedTagId = archivedTag ? archivedTag.id : null;
+  const isArchived = archivedTagId ? (AppState.tagAssignments[chatId] || []).some(id => String(id) === String(archivedTagId)) : false;
+
+  // list tags as clickable menu items (excluding Archived tag)
+  const nonSystemTags = AppState.tags.filter(t => !(t.name === 'Archived' && t.is_system));
+  if (nonSystemTags && nonSystemTags.length > 0) {
+    for (const t of nonSystemTags) {
+      const isAssigned = (AppState.tagAssignments[chatId] || []).some(id => String(id) === String(t.id));
+      const row = document.createElement('div');
+      row.style.padding = '10px 12px';
+      row.style.cursor = 'pointer';
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.userSelect = 'none';
+      row.style.fontSize = '13px';
+      row.style.backgroundColor = isAssigned ? '#f0f0f0' : '#fff';
+      row.style.borderBottom = '1px solid #f0f0f0';
+
+      row.addEventListener('mouseenter', () => {
+        row.style.backgroundColor = '#e8e8e8';
+      });
+      row.addEventListener('mouseleave', () => {
+        row.style.backgroundColor = isAssigned ? '#f0f0f0' : '#fff';
+      });
+
+      const checkmark = document.createElement('span');
+      checkmark.style.width = '16px';
+      checkmark.style.marginRight = '10px';
+      checkmark.style.display = 'inline-block';
+      checkmark.textContent = isAssigned ? '✓' : '';
+      checkmark.style.fontWeight = 'bold';
+      checkmark.style.color = t.color || '#999';
+
+      const colorDot = document.createElement('span');
+      colorDot.style.width = '10px';
+      colorDot.style.height = '10px';
+      colorDot.style.borderRadius = '5px';
+      colorDot.style.background = t.color || '#999';
+      colorDot.style.display = 'inline-block';
+      colorDot.style.marginRight = '8px';
+      colorDot.style.flexShrink = 0;
+
+      const lbl = document.createElement('span');
+      lbl.textContent = t.name;
+      lbl.style.flex = 1;
+
+      row.appendChild(checkmark);
+      row.appendChild(colorDot);
+      row.appendChild(lbl);
+
+      row.addEventListener('click', async () => {
+        try {
+          if (isAssigned) {
+            await unassignTagOnServer(t.id, chatId);
+          } else {
+            await assignTagOnServer(t.id, chatId);
+          }
+          await loadTagsFromServer();
+          if (AppState.currentContextMenu) {
+            AppState.currentContextMenu.remove();
+            AppState.currentContextMenu = null;
+          }
+        } catch (err) {
+          console.error(err);
+          alert('Failed to update tag assignment');
+        }
+      });
+
+      menu.appendChild(row);
+    }
+  } else {
+    const empty = document.createElement('div');
+    empty.style.padding = '10px 12px';
+    empty.style.fontSize = '13px';
+    empty.style.color = '#999';
+    empty.textContent = 'No tags yet';
+    menu.appendChild(empty);
+  }
+
+  // separator
+  const sep = document.createElement('div');
+  sep.style.height = '1px';
+  sep.style.background = '#ddd';
+  menu.appendChild(sep);
+
+  // create new tag action
+  const createRow = document.createElement('div');
+  createRow.style.padding = '10px 12px';
+  createRow.style.cursor = 'pointer';
+  createRow.style.fontSize = '13px';
+  createRow.style.userSelect = 'none';
+  createRow.textContent = '+ Create New Tag';
+  createRow.addEventListener('mouseenter', () => {
+    createRow.style.backgroundColor = '#e8e8e8';
+  });
+  createRow.addEventListener('mouseleave', () => {
+    createRow.style.backgroundColor = '#fff';
+  });
+  createRow.addEventListener('click', () => {
+    if (AppState.currentContextMenu) {
+      AppState.currentContextMenu.remove();
+      AppState.currentContextMenu = null;
+    }
+    openTagEditor('', '#ffcc00', async (v) => {
+      if (!v) return;
+      const created = await createTagOnServer(v.name, v.color);
+      await assignTagOnServer(created.id, chatId);
+      await loadTagsFromServer();
+    });
+  });
+  menu.appendChild(createRow);
+
+  // Notes actions
+  const notesTitle = document.createElement('div');
+  notesTitle.style.padding = '8px 12px';
+  notesTitle.style.fontSize = '13px';
+  notesTitle.style.color = '#666';
+  notesTitle.style.borderTop = '1px solid #eee';
+  notesTitle.textContent = 'Notes';
+  menu.appendChild(notesTitle);
+
+  const addNoteRow = document.createElement('div');
+  addNoteRow.style.padding = '10px 12px';
+  addNoteRow.style.cursor = 'pointer';
+  addNoteRow.style.fontSize = '13px';
+  addNoteRow.style.userSelect = 'none';
+  addNoteRow.textContent = '+ Add Note';
+  addNoteRow.addEventListener('mouseenter', () => {
+    addNoteRow.style.backgroundColor = '#e8e8e8';
+  });
+  addNoteRow.addEventListener('mouseleave', () => {
+    addNoteRow.style.backgroundColor = '#fff';
+  });
+  addNoteRow.addEventListener('click', () => {
+    if (AppState.currentContextMenu) {
+      AppState.currentContextMenu.remove();
+      AppState.currentContextMenu = null;
+    }
+    const c = AppState.chats.find(x => x.chatId === chatId);
+    const title = c ? (c.name || c.chatId) : chatId;
+    openNotesModal(chatId, title);
+  });
+  menu.appendChild(addNoteRow);
+
+  const viewNotesRow = document.createElement('div');
+  viewNotesRow.style.padding = '10px 12px';
+  viewNotesRow.style.cursor = 'pointer';
+  viewNotesRow.style.fontSize = '13px';
+  viewNotesRow.style.userSelect = 'none';
+  viewNotesRow.textContent = 'Edit Notes';
+  viewNotesRow.addEventListener('mouseenter', () => {
+    viewNotesRow.style.backgroundColor = '#e8e8e8';
+  });
+  viewNotesRow.addEventListener('mouseleave', () => {
+    viewNotesRow.style.backgroundColor = '#fff';
+  });
+  viewNotesRow.addEventListener('click', () => {
+    if (AppState.currentContextMenu) {
+      AppState.currentContextMenu.remove();
+      AppState.currentContextMenu = null;
+    }
+    const c = AppState.chats.find(x => x.chatId === chatId);
+    const title = c ? (c.name || c.chatId) : chatId;
+    openNotesModal(chatId, title);
+  });
+  menu.appendChild(viewNotesRow);
+
+  // Archive action
+  const actionsTitle = document.createElement('div');
+  actionsTitle.style.padding = '8px 12px';
+  actionsTitle.style.fontSize = '13px';
+  actionsTitle.style.color = '#666';
+  actionsTitle.style.borderTop = '1px solid #eee';
+  actionsTitle.textContent = 'Actions';
+  menu.appendChild(actionsTitle);
+
+  const archiveRow = document.createElement('div');
+  archiveRow.style.padding = '10px 12px';
+  archiveRow.style.cursor = 'pointer';
+  archiveRow.style.fontSize = '13px';
+  archiveRow.style.userSelect = 'none';
+  archiveRow.textContent = isArchived ? '📂 Unarchive Chat' : '📦 Archive Chat';
+
+  archiveRow.addEventListener('mouseenter', () => {
+    archiveRow.style.backgroundColor = '#e8e8e8';
+  });
+  archiveRow.addEventListener('mouseleave', () => {
+    archiveRow.style.backgroundColor = '#fff';
+  });
+  archiveRow.addEventListener('click', () => {
+    if (AppState.currentContextMenu) {
+      AppState.currentContextMenu.remove();
+      AppState.currentContextMenu = null;
+    }
+    if (isArchived) {
+      unarchiveChat(chatId);
+    } else {
+      archiveChat(chatId);
+    }
+  });
+  menu.appendChild(archiveRow);
+
+  document.body.appendChild(menu);
+  AppState.currentContextMenu = menu;
+
+  const removeMenu = () => {
+    if (AppState.currentContextMenu && AppState.currentContextMenu === menu) {
+      AppState.currentContextMenu.remove();
+      AppState.currentContextMenu = null;
+    }
+    document.removeEventListener('click', removeMenu);
+  };
+
+  setTimeout(() => document.addEventListener('click', removeMenu), 50);
+}
