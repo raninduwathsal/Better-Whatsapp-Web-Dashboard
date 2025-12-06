@@ -10,7 +10,8 @@
 
       #messages { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap:12px }
       .msg { background:white;padding:10px;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);cursor:pointer;user-select:none;position:relative;min-height:80px }
-      .msg.selected { outline:3px solid #2b8aef }
+      .msg.selected { outline:3px solid #25D366; background: linear-gradient(135deg, rgba(37,211,102,0.15) 0%, rgba(37,211,102,0.08) 100%); position:relative }
+      .msg.selected::after { content:''; position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(37,211,102,0.12); border-radius:10px; pointer-events:none }
       .meta { font-size:13px;color:#222;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between }
       #preset { width:60%; padding:6px }
       #sendBtn { padding:6px 10px }
@@ -94,6 +95,8 @@
     <script src="/js/state.js"></script>
     <!-- Socket handlers -->
     <script src="/js/socket.js"></script>
+    <!-- Keyboard shortcuts -->
+    <script src="/js/keyboard.js"></script>
     <!-- Feature modules -->
     <script src="/js/features/tags.js"></script>
     <script src="/js/features/notes.js"></script>

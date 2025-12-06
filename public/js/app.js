@@ -13,6 +13,9 @@ AppState.refreshBtn = document.getElementById('refresh');
 
 // Initialize all features on page load
 function initializeApp() {
+  // Initialize keyboard shortcuts
+  initKeyboardShortcuts();
+
   // Create settings sidebar
   createSettingsSidebar();
 
@@ -164,6 +167,65 @@ function createSettingsSidebar() {
     renderQuickRepliesSettings();
   });
   togglesContainer.appendChild(quickRepliesToggle);
+
+  // Keyboard Shortcuts button
+  const shortcutsBtn = document.createElement('div');
+  shortcutsBtn.style.padding = '8px 12px';
+  shortcutsBtn.style.borderBottom = '1px solid #eee';
+  shortcutsBtn.style.cursor = 'pointer';
+  shortcutsBtn.style.display = 'flex';
+  shortcutsBtn.style.justifyContent = 'space-between';
+  shortcutsBtn.style.alignItems = 'center';
+  shortcutsBtn.style.background = '#f0f2f5';
+  shortcutsBtn.textContent = '⌨️ Keyboard Shortcuts';
+  shortcutsBtn.style.fontWeight = '500';
+  shortcutsBtn.style.color = '#25D366';
+  shortcutsBtn.addEventListener('mouseenter', () => {
+    shortcutsBtn.style.backgroundColor = '#e8e8e8';
+  });
+  shortcutsBtn.addEventListener('mouseleave', () => {
+    shortcutsBtn.style.backgroundColor = '#f0f2f5';
+  });
+  shortcutsBtn.addEventListener('click', () => {
+    showShortcutsGuide();
+  });
+  togglesContainer.appendChild(shortcutsBtn);
+
+  // Logout button
+  const logoutBtn = document.createElement('div');
+  logoutBtn.style.padding = '8px 12px';
+  logoutBtn.style.borderBottom = '1px solid #eee';
+  logoutBtn.style.cursor = 'pointer';
+  logoutBtn.style.display = 'flex';
+  logoutBtn.style.justifyContent = 'space-between';
+  logoutBtn.style.alignItems = 'center';
+  logoutBtn.style.background = '#fff';
+  logoutBtn.textContent = '🚪 Logout from WhatsApp';
+  logoutBtn.style.fontWeight = '500';
+  logoutBtn.style.color = '#e74c3c';
+  logoutBtn.addEventListener('mouseenter', () => {
+    logoutBtn.style.backgroundColor = '#fee';
+  });
+  logoutBtn.addEventListener('mouseleave', () => {
+    logoutBtn.style.backgroundColor = '#fff';
+  });
+  logoutBtn.addEventListener('click', async () => {
+    if (confirm('Are you sure you want to logout from WhatsApp? You will need to scan the QR code again.')) {
+      try {
+        const response = await fetch('/api/logout', { method: 'POST' });
+        if (response.ok) {
+          alert('Logged out successfully. The page will reload.');
+          window.location.reload();
+        } else {
+          alert('Failed to logout. Please try again.');
+        }
+      } catch (err) {
+        console.error('Logout error:', err);
+        alert('Error during logout: ' + err.message);
+      }
+    }
+  });
+  togglesContainer.appendChild(logoutBtn);
 
   sidebar.appendChild(togglesContainer);
 

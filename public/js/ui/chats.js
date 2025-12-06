@@ -59,16 +59,28 @@ function renderChats() {
     
     // Add hover and selection animation
     el.style.transition = 'transform 0.2s ease, box-shadow 0.2s ease';
+    
+    // Check if this chat has notes for preview
+    const noteCount = AppState.notesCounts[c.chatId] || 0;
+    
     el.addEventListener('mouseenter', () => {
       if (!AppState.selectedChats.has(c.chatId)) {
         el.style.transform = 'scale(1.02)';
         el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+      }
+      // Show notes preview if this chat has notes
+      if (noteCount > 0 && typeof showNotesPreviewBubble === 'function') {
+        showNotesPreviewBubble(el, c.chatId);
       }
     });
     el.addEventListener('mouseleave', () => {
       if (!AppState.selectedChats.has(c.chatId)) {
         el.style.transform = 'scale(1)';
         el.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+      }
+      // Hide notes preview
+      if (noteCount > 0 && typeof hideNotesPreviewBubble === 'function') {
+        hideNotesPreviewBubble(el);
       }
     });
     if (AppState.selectedChats.has(c.chatId)) {
@@ -89,15 +101,12 @@ function renderChats() {
     left.appendChild(title);
 
     // show notes badge if any
-    const noteCount = AppState.notesCounts[c.chatId] || 0;
     if (noteCount > 0) {
       const noteBadge = document.createElement('span');
       noteBadge.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-left:8px;margin-right:4px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>${noteCount}`;
       noteBadge.style.fontSize = '13px';
       noteBadge.style.color = '#667781';
       noteBadge.title = `${noteCount} note${noteCount !== 1 ? 's' : ''}`;
-      noteBadge.addEventListener('mouseenter', () => showNotesPreviewBubble(noteBadge, c.chatId));
-      noteBadge.addEventListener('mouseleave', () => hideNotesPreviewBubble(noteBadge));
       left.appendChild(noteBadge);
     }
 
@@ -243,4 +252,14 @@ function renderChats() {
 
     messagesEl.appendChild(el);
   }
+
+  // Add click handler to messages container to deselect on empty space click
+  messagesEl.addEventListener('click', (e) => {
+    // Only deselect if clicking directly on the container (not on a child element)
+    if (e.target === messagesEl) {
+      AppState.selectedChats.clear();
+      keyboardFocusedChatId = null;
+      renderChats();
+    }
+  });
 }

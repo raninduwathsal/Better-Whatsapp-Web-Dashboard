@@ -222,7 +222,7 @@ function openTagEditor(initialName, initialColor, onSave) {
   });
   
   const saveBtn = document.createElement('button');
-  saveBtn.textContent = 'Save';
+  saveBtn.textContent = 'Save (Ctrl+Enter)';
   saveBtn.style.padding = '8px 20px';
   saveBtn.style.background = '#25D366';
   saveBtn.style.color = '#fff';
@@ -256,16 +256,36 @@ function openTagEditor(initialName, initialColor, onSave) {
     onSave(v);
   }
   
-  closeBtn.addEventListener('click', () => close(null));
-  cancelBtn.addEventListener('click', () => close(null));
-  saveBtn.addEventListener('click', () => {
+  function handleSave() {
     if (nameInput.value.trim()) {
       close({ name: nameInput.value.trim(), color: colorInput.value });
     }
-  });
+  }
+  
+  const handleModalKeydown = (e) => {
+    if (e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close(null);
+    }
+  };
+  
+  closeBtn.addEventListener('click', () => close(null));
+  cancelBtn.addEventListener('click', () => close(null));
+  saveBtn.addEventListener('click', handleSave);
+  document.addEventListener('keydown', handleModalKeydown);
   
   // Focus name input automatically
   nameInput.focus();
+  
+  // Clean up keyboard handler when modal closes
+  const originalClose = close;
+  close = function(v) {
+    document.removeEventListener('keydown', handleModalKeydown);
+    originalClose(v);
+  };
 }
 
 // Render tag filter chips

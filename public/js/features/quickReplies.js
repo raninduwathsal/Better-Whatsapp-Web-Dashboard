@@ -216,7 +216,7 @@ function openQuickReplyEditor(initialText, onSave) {
   });
   
   const saveBtn = document.createElement('button');
-  saveBtn.textContent = 'Save';
+  saveBtn.textContent = 'Save (Ctrl+Enter)';
   saveBtn.style.padding = '8px 20px';
   saveBtn.style.background = '#25D366';
   saveBtn.style.color = '#fff';
@@ -252,12 +252,34 @@ function openQuickReplyEditor(initialText, onSave) {
     onSave(v);
   }
 
+  function handleSave() {
+    close(ta.value.trim());
+  }
+  
+  const handleModalKeydown = (e) => {
+    if (e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close(null);
+    }
+  };
+
   closeBtn.addEventListener('click', () => close(null));
   cancelBtn.addEventListener('click', () => close(null));
-  saveBtn.addEventListener('click', () => close(ta.value.trim()));
+  saveBtn.addEventListener('click', handleSave);
+  document.addEventListener('keydown', handleModalKeydown);
   
   // Focus textarea automatically
   ta.focus();
+  
+  // Clean up keyboard handler when modal closes
+  const originalClose = close;
+  close = function(v) {
+    document.removeEventListener('keydown', handleModalKeydown);
+    originalClose(v);
+  };
 }
 
 // Render quick replies settings panel

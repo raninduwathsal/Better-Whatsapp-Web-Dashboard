@@ -193,7 +193,7 @@
     {
       "chatId": "3334445555@c.us",
       "name": "👨‍💼 CEO",
-      "unreadCount": 1,
+      "unreadCount": 0,
       "lastTimestamp": 1733515000,
       "history": [
         {
@@ -398,19 +398,25 @@
       "tag_id": 2,
       "chat_id": "5556667777@c.us",
       "phone_number": "5556667777"
+    },
+    {
+      "id": 9,
+      "tag_id": 5,
+      "chat_id": "3334445555@c.us",
+      "phone_number": "3334445555"
     }
   ],
   "notes": [
     {
-      "id": 1,
+      "id": 3,
       "chat_id": "1234567890@c.us",
       "phone_number": "1234567890",
-      "text": "Important client - always respond within 1 hour",
-      "created_at": "2024-12-01T10:00:00Z",
+      "text": "Prefers communication via email for formal matters",
+      "created_at": "2024-12-03T09:00:00Z",
       "updated_at": null
     },
     {
-      "id": 2,
+      "id": 4,
       "chat_id": "4445556666@c.us",
       "phone_number": "4445556666",
       "text": "Working on project X\nDeadline: Dec 15\nStatus: In Progress",
@@ -418,7 +424,15 @@
       "updated_at": null
     },
     {
-      "id": 3,
+      "id": 5,
+      "chat_id": "4445556666@c.us",
+      "phone_number": "4445556666",
+      "text": "Needs weekly status updates on Fridays",
+      "created_at": "2024-12-04T10:00:00Z",
+      "updated_at": null
+    },
+    {
+      "id": 6,
       "chat_id": "9876543210@c.us",
       "phone_number": "9876543210",
       "text": "Send monthly report",
@@ -426,7 +440,7 @@
       "updated_at": null
     },
     {
-      "id": 4,
+      "id": 7,
       "chat_id": "2223334444@c.us",
       "phone_number": "2223334444",
       "text": "Design review: 2 PM tomorrow\nPrep mockups and specs",
@@ -434,7 +448,7 @@
       "updated_at": null
     },
     {
-      "id": 5,
+      "id": 8,
       "chat_id": "3334445555@c.us",
       "phone_number": "3334445555",
       "text": "Daily standup: 10 AM\nQuarterly review: Dec 15",

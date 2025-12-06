@@ -12,3 +12,11 @@ function archiveChat(chatId) {
 function unarchiveChat(chatId) {
   socket.emit('unarchiveChat', { chatId });
 }
+
+// Mark one or more chats as read
+function markChatsAsRead(chatIds = null) {
+  // If no chatIds provided, use selected chats or focused chat
+  const ids = chatIds || Array.from(AppState.selectedChats) || (keyboardFocusedChatId ? [keyboardFocusedChatId] : []);
+  if (ids.length === 0) return;
+  socket.emit('markAsRead', { chatIds: ids });
+}

@@ -261,6 +261,29 @@ function openTagContextMenu(x, y, chatId) {
   });
   menu.appendChild(archiveRow);
 
+  // Mark as Read action
+  const markReadRow = document.createElement('div');
+  markReadRow.style.padding = '10px 12px';
+  markReadRow.style.cursor = 'pointer';
+  markReadRow.style.fontSize = '13px';
+  markReadRow.style.userSelect = 'none';
+  markReadRow.textContent = '✓ Mark as Read';
+
+  markReadRow.addEventListener('mouseenter', () => {
+    markReadRow.style.backgroundColor = '#e8e8e8';
+  });
+  markReadRow.addEventListener('mouseleave', () => {
+    markReadRow.style.backgroundColor = '#fff';
+  });
+  markReadRow.addEventListener('click', () => {
+    if (AppState.currentContextMenu) {
+      AppState.currentContextMenu.remove();
+      AppState.currentContextMenu = null;
+    }
+    markChatsAsRead([chatId]);
+  });
+  menu.appendChild(markReadRow);
+
   document.body.appendChild(menu);
   AppState.currentContextMenu = menu;
 

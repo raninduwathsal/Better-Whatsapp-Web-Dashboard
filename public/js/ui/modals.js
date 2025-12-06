@@ -38,6 +38,19 @@ function openFullChat(chatId, title) {
     document.body.removeChild(modal);
   });
 
+  // Keyboard handlers for full chat modal
+  const handleFullChatKeydown = (e) => {
+    if (e.key === 'Enter' && e.target === input) {
+      e.preventDefault();
+      send.click();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeBtn.click();
+    }
+  };
+  
+  document.addEventListener('keydown', handleFullChatKeydown);
+
   // request full chat from server
   socket.emit('getFullChat', chatId);
   // show loading
@@ -58,11 +71,16 @@ function openFullChat(chatId, title) {
     renderFullChatBody(body, msgs);
     // scroll to bottom
     body.scrollTop = body.scrollHeight;
+    // Auto-focus the input field
+    input.focus();
   };
   socket.on('full_chat', handler);
 
   // cleanup listener when modal closed
-  modal.addEventListener('remove', () => socket.off('full_chat', handler));
+  modal.addEventListener('remove', () => {
+    socket.off('full_chat', handler);
+    document.removeEventListener('keydown', handleFullChatKeydown);
+  });
 }
 
 function renderFullChatBody(container, messages) {

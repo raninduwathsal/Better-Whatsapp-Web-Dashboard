@@ -8,6 +8,67 @@ To DO: Create a branch with support for official whatsapp bussiness API (PRs wel
 Requirements
 - Node.js 16+ (LTS recommended)
 
+
+- **Comprehensive Keyboard Shortcuts**: 26 keyboard shortcuts for power users to navigate, select, send messages, and manage chats entirely without a mouse.
+
+### Keyboard Shortcuts
+---
+**Navigation**
+- `↑ ↓ ← →` - Navigate between chats in grid layout
+- `Space` - Add/remove focused chat from selection
+- `Enter` - Open full chat modal
+- `Escape` - Deselect all chats
+- `Ctrl+A` - Select all visible chats
+
+**Quick Replies**
+- `Ctrl+1` through `Ctrl+9` - Send quick reply #1-9 to selected chats
+- `Ctrl+0` - Create new quick reply
+
+**Interface**
+- `Ctrl+/` or `?` - Show keyboard shortcuts guide
+- `Ctrl+H` - Toggle settings sidebar
+- `Ctrl+T` - Create new tag
+- `Ctrl+R` - Refresh chats
+- `Ctrl+M` - Focus message input field
+- `Ctrl+Shift+R` - Mark selected chats as read
+
+**Modals**
+- `Ctrl+Enter` - Save/confirm in tag/quick reply/note editors
+- `Escape` - Cancel/close any modal
+- `Enter` - Send message (in full chat modal)
+- `Escape` - Close full chat modal
+---
+
+### Press `?` or `Ctrl+/` in the app to view the shortcuts guide anytime.
+---
+![overview](./DOCS/Readme-images/overview-Gif.gif)
+
+
+---
+### Special Features
+- Quick Replies (for multiple chats) CRUD: create, edit, delete, import from JSON, export to JSON.
+![quick-replies](./Docs/Readme-images/quick-replies.png )
+- Multi-select send: select multiple chat cards and send a quick reply to all of them at once.
+- Compact cards: each chat card shows last messages (up to 3) with WhatsApp-like bubbles for quick scanning.
+- Sticker & media preview: stickers are shown inline in compact cards (small thumbnail) and full media (images/PDFs) render inside the full-chat modal.
+- Tags (backup and restorable ): create colored tags, assign/unassign tags to chats via right-click context menu, filter the chat grid by tag, and import/export tags + assignments.
+- Notes: add freeform notes bound to chats. Notes support create/read/update/delete, import/export, deduplication on import, and phone-number fallback mapping during import.
+- Note badges & preview: chat cards show a compact notes badge (📝) when notes exist. Hovering a card for ~1.5s shows a floating preview bubble with up to 3 notes (scrollable if more).
+
+> ![notes-preview](./Docs/Readme-images/notes-preview.png)
+- Context menu: right-click a chat card to manage tags and notes quickly (`+ Add Note`, `Edit Notes`).
+
+> ![context-menu](./Docs/Readme-images/context-menu.png)
+- Central Notes settings: a `Notes ⚙` button in the header exposes a central Import/Export panel to backup or restore all notes.
+> ![serverbacking](./Docs/Readme-images/Import-export.png)
+- Server-backed persistence: presets, tags, tag assignments, and notes are stored in `data.sqlite` via `sql.js` (WASM).
+
+
+### Notes (details)
+- Storage: notes are stored with both `chat_id` (e.g., `1234567890@c.us`) and a normalized `phone_number` when available. This helps reconnect notes if chats are deleted and later reappear.
+- Import behavior: the import endpoint attempts to match incoming notes to existing chats by `chatId` first, then by `phoneNumber` (matching `tag_assignments.phone_number` or existing `notes.phone_number`), and finally by constructing `phone@c.us` as a fallback. Import has optional `replace` behavior (delete existing then insert).
+- Deduplication: when importing, the server skips notes that already exist with identical `chat_id` and `text` (counts reported in the import response as `imported`, `skipped`, `failed`, `total`).
+
 Install
 
 ```bash
@@ -38,12 +99,6 @@ Notes & next steps
   - confirmations and delivery status
   - authentication & access control for the web UI
 
-## Better Whatsapp
-
-Better WhatsApp is a local desktop web app that connects to your WhatsApp account via WhatsApp Web and provides a compact, productivity-focused dashboard for handling messages and sending preset replies.
-
-This project is a developer-focused prototype — run it locally, connect by scanning a WhatsApp QR code, and keep the session on your machine.
-
 ### Why "Better WhatsApp"?
 - Focused inbox: grid of chat cards so you can scan recent conversations quickly.
 - Quick replies: create, edit, import/export, and send preset messages to single or multiple selected chats.
@@ -51,13 +106,6 @@ This project is a developer-focused prototype — run it locally, connect by sca
 - Full-chat modal: open a chat to see a scrollable history (with inline images and PDF previews) and send messages from the modal.
 - Pinning & unread prioritization: pin important chats and surface unread conversations.
 
-### Special Features
-- Quick Replies CRUD: create, edit, delete, import from JSON, export to JSON.
-- Multi-select send: select multiple chat cards and send a quick reply to all of them at once.
-- Compact cards: each chat card shows last messages (up to 3) with WhatsApp-like bubbles for quick scanning.
-- Sticker & media preview: stickers are shown inline in compact cards (small thumbnail) and full media (images/PDFs) render inside the full-chat modal.
-- Server-backed persistence: presets stored in `data.sqlite` using `sql.js` (WASM) for portability without native builds.
-- Small test harness: `test/test_quick_replies.js` exercises the quick-reply API (create/update/delete/export/import) and exits with a pass/fail code so you can quickly verify changes.
 
 ### Risks & Important Notes
 - This app uses the WhatsApp Web client (via `whatsapp-web.js`) and requires scanning your WhatsApp QR to link. The application acts like a browser session for your account.
@@ -89,8 +137,7 @@ Requirements
 
 Install
 
-````markdown
-# Better Whatsapp Web
+
 
 Simple local app to connect your WhatsApp by scanning a QR code, display recent messages in a grid, select a chat card (or click "Send to selected") to send a preset reply.
 
@@ -127,32 +174,6 @@ How it works
 - After authentication the UI hides the QR and shows messages in a compact grid.
 - Click a chat card to select it. Type a preset reply in the input and click "Send to selected".
 
-## Better Whatsapp
-
-Better WhatsApp is a local desktop web app that connects to your WhatsApp account via WhatsApp Web and provides a compact, productivity-focused dashboard for handling messages and sending preset replies.
-
-This project is a developer-focused prototype — run it locally, connect by scanning a WhatsApp QR code, and keep the session on your machine.
-
-### Why "Better WhatsApp"?
-- Focused inbox: grid of chat cards so you can scan recent conversations quickly.
-- Quick replies: create, edit, import/export, and send preset messages to single or multiple selected chats.
-- Persistent server-side storage: quick replies and tags/notes are stored in a local SQLite file (`data.sqlite`) (implemented with `sql.js`).
-- Full-chat modal: open a chat to see a scrollable history (with inline images and PDF previews) and send messages from the modal.
-- Pinning & unread prioritization: pin important chats and surface unread conversations.
-
-### Special Features
-- Quick Replies CRUD: create, edit, delete, import from JSON, export to JSON.
-- Tags: create colored tags, assign/unassign tags to chats via right-click context menu, filter the chat grid by tag, and import/export tags + assignments.
-- Notes: add freeform notes bound to chats. Notes support create/read/update/delete, import/export, deduplication on import, and phone-number fallback mapping during import.
-- Note badges & preview: chat cards show a compact notes badge (📝) when notes exist. Hovering a card for ~1.5s shows a floating preview bubble with up to 3 notes (scrollable if more).
-- Context menu: right-click a chat card to manage tags and notes quickly (`+ Add Note`, `Edit Notes`).
-- Central Notes settings: a `Notes ⚙` button in the header exposes a central Import/Export panel to backup or restore all notes.
-- Server-backed persistence: presets, tags, tag assignments, and notes are stored in `data.sqlite` via `sql.js` (WASM).
-
-### Notes (details)
-- Storage: notes are stored with both `chat_id` (e.g., `1234567890@c.us`) and a normalized `phone_number` when available. This helps reconnect notes if chats are deleted and later reappear.
-- Import behavior: the import endpoint attempts to match incoming notes to existing chats by `chatId` first, then by `phoneNumber` (matching `tag_assignments.phone_number` or existing `notes.phone_number`), and finally by constructing `phone@c.us` as a fallback. Import has optional `replace` behavior (delete existing then insert).
-- Deduplication: when importing, the server skips notes that already exist with identical `chat_id` and `text` (counts reported in the import response as `imported`, `skipped`, `failed`, `total`).
 
 ### API Endpoints (useful ones)
 - GET `/api/notes?chatId=...` — list notes for a chat.
@@ -192,12 +213,18 @@ The notes test (`test/test_notes.js`) will:
 - If exposing this server beyond localhost, add authentication (not included in the prototype).
 
 ### Contributing
-- This project is a prototype — contributions welcome. Useful additions:
   - authentication for the web UI
   - paginated message loading and search
   - streaming media previews and thumbnails
   - per-chat pin persistence
 
+use the dev-frontend server if you are only doing frontend stuff (no need for linking whatsapp almost all functionality should retain except for minor glithces)
+
+```bash
+npm run dev-frontend
+```
+this will load a sample frontend with mock-server.js as backend
+![mock-server](./Docs/Readme-images/overview.png)
 ### License & Disclaimer
 - This is an independent project (MIT-style usage). It is not affiliated with WhatsApp/Facebook/Meta.
 - Use responsibly and respect WhatsApp's Terms of Service.

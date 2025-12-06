@@ -34,7 +34,11 @@ function getNoteCounts() {
   mockData.notes.forEach(note => {
     counts[note.chat_id] = (counts[note.chat_id] || 0) + 1;
   });
-  return counts;
+  // Convert to array format expected by frontend
+  return Object.keys(counts).map(chatId => ({
+    chatId: chatId,
+    count: counts[chatId]
+  }));
 }
 
 // API Routes - Tags
@@ -225,6 +229,14 @@ app.post('/api/quick-replies/import', (req, res) => {
   res.json({ success: true });
 });
 
+// API Routes - Logout
+app.post('/api/logout', (req, res) => {
+  console.log('Mock: Logout requested (session data would be cleared in production)');
+  // In mock mode, just return success
+  // In production with real WhatsApp, this would delete .wwebjs_auth and .wwebjs_cache folders
+  res.json({ success: true, message: 'Logged out (mock mode)' });
+});
+
 // Socket.io handlers
 io.on('connection', (socket) => {
   console.log('Frontend connected');
@@ -300,6 +312,20 @@ io.on('connection', (socket) => {
       saveMockData();
     }
     socket.emit('tags_updated');
+  });
+
+  socket.on('markAsRead', ({ chatIds }) => {
+    console.log(`Mock: Marking chats as read:`, chatIds);
+    if (!Array.isArray(chatIds)) chatIds = [chatIds];
+    // Update unreadCount to 0 for marked chats
+    for (const chatId of chatIds) {
+      const chat = mockData.chats.find(c => c.chatId === chatId);
+      if (chat) {
+        chat.unreadCount = 0;
+      }
+    }
+    saveMockData();
+    socket.emit('chats', mockData.chats);
   });
   
   socket.on('disconnect', () => {

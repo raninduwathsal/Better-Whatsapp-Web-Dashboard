@@ -10,6 +10,7 @@ const { initSocketHandlers } = require('./server/sockets/handlers');
 const tagsRoutes = require('./server/routes/tags');
 const notesRoutes = require('./server/routes/notes');
 const quickRepliesRoutes = require('./server/routes/quickReplies');
+const logoutRoute = require('./server/routes/logout');
 
 const app = express();
 const server = http.createServer(app);
@@ -26,6 +27,7 @@ app.set('io', io);
 app.use('/api/tags', tagsRoutes);
 app.use('/api/notes', notesRoutes);
 app.use('/api/quick-replies', quickRepliesRoutes);
+app.use('/api/logout', logoutRoute);
 
 // Initialize socket handlers
 initSocketHandlers(io);

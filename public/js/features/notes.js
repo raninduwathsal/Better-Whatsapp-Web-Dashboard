@@ -136,7 +136,7 @@ function openNotesModal(chatId, title) {
   });
   
   const addBtn = document.createElement('button');
-  addBtn.textContent = 'Add';
+  addBtn.textContent = 'Add (Ctrl+Enter)';
   addBtn.style.padding = '10px 16px';
   addBtn.style.background = '#25D366';
   addBtn.style.color = '#fff';
@@ -184,6 +184,18 @@ function openNotesModal(chatId, title) {
   closeBtn.addEventListener('click', () => {
     document.body.removeChild(modal);
   });
+  
+  const handleModalKeydown = (e) => {
+    if (e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault();
+      addBtn.click();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeBtn.click();
+    }
+  };
+  
+  document.addEventListener('keydown', handleModalKeydown);
 
   addBtn.addEventListener('click', async () => {
     const text = ta.value && ta.value.trim();
@@ -333,48 +345,60 @@ function renderNotesList(container, chatId, notes) {
 function showNotesPreviewBubble(anchorEl, chatId) {
   hideNotesPreviewBubble(anchorEl);
   
-  loadNotesForChat(chatId).then(notes => {
-    if (!notes || notes.length === 0) return;
+  // Set a timeout to show preview after 1.5 seconds
+  const timeoutId = setTimeout(() => {
+    loadNotesForChat(chatId).then(notes => {
+      if (!notes || notes.length === 0) return;
 
-    const bubble = document.createElement('div');
-    bubble.style.position = 'fixed';
-    bubble.style.background = '#fff';
-    bubble.style.border = '1px solid #ddd';
-    bubble.style.borderRadius = '6px';
-    bubble.style.padding = '8px';
-    bubble.style.maxWidth = '200px';
-    bubble.style.maxHeight = '200px';
-    bubble.style.overflowY = 'auto';
-    bubble.style.zIndex = '10000';
-    bubble.style.fontSize = '12px';
-    bubble.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)';
+      const bubble = document.createElement('div');
+      bubble.style.position = 'fixed';
+      bubble.style.background = '#fff';
+      bubble.style.border = '1px solid #ddd';
+      bubble.style.borderRadius = '6px';
+      bubble.style.padding = '8px';
+      bubble.style.maxWidth = '200px';
+      bubble.style.maxHeight = '200px';
+      bubble.style.overflowY = 'auto';
+      bubble.style.zIndex = '10000';
+      bubble.style.fontSize = '12px';
+      bubble.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)';
 
-    const rect = anchorEl.getBoundingClientRect();
-    bubble.style.left = (rect.right + 8) + 'px';
-    bubble.style.top = (rect.top) + 'px';
+      const rect = anchorEl.getBoundingClientRect();
+      bubble.style.left = (rect.right + 8) + 'px';
+      bubble.style.top = (rect.top) + 'px';
 
-    const title = document.createElement('div');
-    title.style.fontWeight = 'bold';
-    title.style.marginBottom = '6px';
-    title.textContent = `${notes.length} note${notes.length !== 1 ? 's' : ''}`;
-    bubble.appendChild(title);
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.style.marginBottom = '6px';
+      title.textContent = `${notes.length} note${notes.length !== 1 ? 's' : ''}`;
+      bubble.appendChild(title);
 
-    for (const note of notes) {
-      const line = document.createElement('div');
-      line.style.marginBottom = '6px';
-      line.style.paddingBottom = '6px';
-      line.style.borderBottom = '1px solid #eee';
-      line.textContent = note.text.substring(0, 50) + (note.text.length > 50 ? '...' : '');
-      bubble.appendChild(line);
-    }
+      for (const note of notes) {
+        const line = document.createElement('div');
+        line.style.marginBottom = '6px';
+        line.style.paddingBottom = '6px';
+        line.style.borderBottom = '1px solid #eee';
+        line.textContent = note.text.substring(0, 50) + (note.text.length > 50 ? '...' : '');
+        bubble.appendChild(line);
+      }
 
-    document.body.appendChild(bubble);
-    anchorEl._noteBubble = bubble;
-  });
+      document.body.appendChild(bubble);
+      anchorEl._noteBubble = bubble;
+    });
+  }, 1500);
+  
+  // Store the timeout ID so we can cancel it if mouse leaves
+  anchorEl._noteTimeout = timeoutId;
 }
 
 // Hide notes preview bubble
 function hideNotesPreviewBubble(anchorEl) {
+  // Cancel the timeout if mouse leaves before 1.5 seconds
+  if (anchorEl && anchorEl._noteTimeout) {
+    clearTimeout(anchorEl._noteTimeout);
+    anchorEl._noteTimeout = null;
+  }
+  
   if (anchorEl && anchorEl._noteBubble) {
     try {
       anchorEl._noteBubble.remove();
