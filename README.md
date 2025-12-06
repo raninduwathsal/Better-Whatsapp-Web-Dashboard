@@ -8,6 +8,9 @@ To DO: Create a branch with support for official whatsapp bussiness API (PRs wel
 Requirements
 - Node.js 16+ (LTS recommended)
 
+  
+![overview](https://raw.githubusercontent.com/raninduwathsal/Better-Whatsapp-Web-WA-Dashboard/refs/heads/main/Docs/Readme-images/overview-Gif.gif)
+
 
 - **Comprehensive Keyboard Shortcuts**: 26 keyboard shortcuts for power users to navigate, select, send messages, and manage chats entirely without a mouse.
 
@@ -40,8 +43,7 @@ Requirements
 ---
 
 ### Press `?` or `Ctrl+/` in the app to view the shortcuts guide anytime.
----
-![overview](./DOCS/Readme-images/overview-Gif.gif)
+
 
 
 ---
