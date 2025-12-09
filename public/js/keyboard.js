@@ -26,13 +26,13 @@ const SHORTCUTS = {
   ],
   ui: [
     { keys: 'Ctrl+F', label: 'Focus Search', action: 'focus-search' },
+    { keys: 'Ctrl+Alt+M', label: 'Mark Selected as Read', action: 'mark-as-read' },
     { keys: 'Ctrl+/', label: 'Show Keyboard Shortcuts', action: 'show-shortcuts' },
     { keys: '?', label: 'Show Keyboard Shortcuts', action: 'show-shortcuts' },
     { keys: 'Ctrl+H', label: 'Toggle Sidebar', action: 'toggle-sidebar' },
     { keys: 'Ctrl+T', label: 'Create New Tag', action: 'create-tag' },
     { keys: 'Ctrl+R', label: 'Refresh Chats', action: 'refresh-chats' },
-    { keys: 'Ctrl+M', label: 'Focus Message Input', action: 'focus-message' },
-    { keys: 'Ctrl+Shift+R', label: 'Mark Selected as Read', action: 'mark-as-read' }
+    { keys: 'Ctrl+M', label: 'Focus Message Input', action: 'focus-message' }
   ],
   modals: [
     { keys: 'Ctrl+Enter', label: 'Save/Confirm (Tags, Quick Replies, Notes)', action: 'modal-save' },
@@ -107,6 +107,14 @@ function handleGlobalKeyboard(e) {
   } else if (ctrl && key === 'a') {
     e.preventDefault();
     selectAllChats();
+  } else if (ctrl && e.altKey && (key === 'm' || key === 'M')) {
+    e.preventDefault();
+    // Mark selected chats as read (works with multiple selections)
+    try {
+      markChatsAsRead();
+    } catch (err) {
+      console.error('markChatsAsRead shortcut failed', err);
+    }
   } else if (key === '?' || (ctrl && key === '/')) {
     e.preventDefault();
     showShortcutsGuide();
@@ -129,9 +137,6 @@ function handleGlobalKeyboard(e) {
     e.preventDefault();
     const presetInput = document.getElementById('preset');
     if (presetInput) presetInput.focus();
-  } else if (ctrl && shift && key === 'R') {
-    e.preventDefault();
-    markChatsAsRead();
   } else if (ctrl && (key >= '0' && key <= '9')) {
     e.preventDefault();
     const num = parseInt(key);

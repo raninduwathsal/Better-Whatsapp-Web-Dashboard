@@ -226,6 +226,53 @@ function initSocketHandlers(io) {
         socket.emit('unarchive_error', { chatId, error: err.message || 'Failed to unarchive' });
       }
     });
+
+    // Mark chats as read
+    socket.on('markAsRead', async ({ chatIds }) => {
+      if (!isReady()) {
+        socket.emit('error', { message: 'WhatsApp not ready' });
+        return;
+      }
+      if (!chatIds) return;
+      if (!Array.isArray(chatIds)) chatIds = [chatIds];
+      try {
+        const client = getClient();
+        for (const cid of chatIds) {
+          try {
+            // Try using client.sendSeen which marks chat as seen
+            if (typeof client.sendSeen === 'function') {
+              await client.sendSeen(cid);
+            } else {
+              // fallback: try to fetch chat object and mark as seen
+              let chatObj = null;
+              try { chatObj = await client.getChatById(cid); } catch (e) {}
+              if (!chatObj) {
+                const all = await client.getChats();
+                chatObj = all.find(c => c.id && c.id._serialized === cid);
+              }
+              if (chatObj && typeof chatObj.sendSeen === 'function') {
+                await chatObj.sendSeen();
+              }
+            }
+          } catch (e) {
+            console.error('Failed to mark read for', cid, e && e.message);
+          }
+        }
+
+        // Refresh chats and notify clients
+        try {
+          const list = await fetchChats(io);
+          io.emit('chats', list);
+        } catch (e) {
+          console.error('Failed to fetch chats after markAsRead', e);
+        }
+
+        socket.emit('marked_read', { chatIds });
+      } catch (err) {
+        console.error('markAsRead failed', err);
+        socket.emit('error', { message: err.message || 'Failed to mark as read' });
+      }
+    });
   });
 }
 

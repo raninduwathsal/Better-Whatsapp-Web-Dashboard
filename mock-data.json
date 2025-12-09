@@ -3,7 +3,7 @@
     {
       "chatId": "1234567890@c.us",
       "name": "John Doe",
-      "unreadCount": 3,
+      "unreadCount": 0,
       "lastTimestamp": 1733500000,
       "history": [
         {
@@ -59,7 +59,7 @@
     {
       "chatId": "5551234567@c.us",
       "name": "Support Team",
-      "unreadCount": 1,
+      "unreadCount": 0,
       "lastTimestamp": 1733495000,
       "history": [
         {
