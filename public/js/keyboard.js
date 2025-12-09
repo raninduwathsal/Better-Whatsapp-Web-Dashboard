@@ -25,6 +25,7 @@ const SHORTCUTS = {
     { keys: 'Ctrl+0', label: 'Create New Quick Reply', action: 'create-quick-reply' }
   ],
   ui: [
+    { keys: 'Ctrl+F', label: 'Focus Search', action: 'focus-search' },
     { keys: 'Ctrl+/', label: 'Show Keyboard Shortcuts', action: 'show-shortcuts' },
     { keys: '?', label: 'Show Keyboard Shortcuts', action: 'show-shortcuts' },
     { keys: 'Ctrl+H', label: 'Toggle Sidebar', action: 'toggle-sidebar' },
@@ -89,6 +90,19 @@ function handleGlobalKeyboard(e) {
       AppState.selectedChats.clear();
       keyboardFocusedChatId = null;
       renderChats();
+    }
+  } else if (ctrl && key === 'f') {
+    e.preventDefault();
+    // Focus header search input (open it if necessary)
+    const toggle = document.getElementById('search-toggle');
+    const input = document.getElementById('header-search-input');
+    if (input) {
+      // If hidden, click toggle to open
+      if (input.style.opacity === '0' && toggle) toggle.click();
+      input.focus();
+      input.select && input.select();
+    } else if (toggle) {
+      toggle.click();
     }
   } else if (ctrl && key === 'a') {
     e.preventDefault();

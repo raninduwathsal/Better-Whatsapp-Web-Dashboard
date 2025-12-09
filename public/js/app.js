@@ -19,6 +19,9 @@ function initializeApp() {
   // Create settings sidebar
   createSettingsSidebar();
 
+  // Create header search UI
+  createHeaderSearch();
+
   // Load initial data from server
   loadTagsFromServer();
   loadNotesCountsFromServer();
@@ -279,6 +282,348 @@ function toggleSidebar() {
   } else {
     sidebar.style.left = '-308px';
     if (messages) messages.style.marginLeft = '0';
+  }
+}
+
+// Create a search button in the header that expands to an input and shows results
+function createHeaderSearch() {
+  const header = document.querySelector('header');
+  if (!header) return;
+
+  // Avoid duplicate
+  if (document.getElementById('search-toggle')) return;
+
+  const wrapper = document.createElement('div');
+  wrapper.id = 'header-search-wrapper';
+  wrapper.style.position = 'relative';
+  wrapper.style.display = 'flex';
+  wrapper.style.alignItems = 'center';
+  wrapper.style.gap = '8px';
+  wrapper.style.marginLeft = '8px';
+
+  const btn = document.createElement('button');
+  btn.id = 'search-toggle';
+  btn.className = 'qr-btn';
+  btn.title = 'Search Chats';
+  btn.setAttribute('aria-label', 'Search Chats');
+  btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>';
+  btn.style.padding = '6px 8px';
+
+  const input = document.createElement('input');
+  input.id = 'header-search-input';
+  input.type = 'search';
+  input.placeholder = 'Search chats...';
+  input.style.transition = 'width 0.18s ease, opacity 0.18s ease';
+  input.style.width = '0px';
+  input.style.opacity = '0';
+  input.style.padding = '6px 8px';
+  input.style.borderRadius = '8px';
+  input.style.border = '1px solid var(--border-input)';
+  input.style.background = 'var(--bg-input)';
+  input.style.color = 'var(--text-primary)';
+
+  const results = document.createElement('div');
+  results.id = 'header-search-results';
+  results.style.position = 'absolute';
+  results.style.top = '40px';
+  results.style.right = '0';
+  results.style.minWidth = '260px';
+  results.style.maxWidth = '420px';
+  results.style.background = 'var(--bg-card)';
+  results.style.border = '1px solid var(--border-medium)';
+  results.style.borderRadius = '8px';
+  results.style.boxShadow = '0 6px 18px rgba(0,0,0,0.12)';
+  results.style.zIndex = '1200';
+  results.style.display = 'none';
+  results.style.overflow = 'auto';
+  results.style.maxHeight = '320px';
+
+  wrapper.appendChild(btn);
+  wrapper.appendChild(input);
+  // small hint help text for keyboard navigation
+  const hint = document.createElement('div');
+  hint.id = 'header-search-hint';
+  hint.textContent = 'Use ↑/↓ to navigate • Enter to select • Esc to close';
+  hint.style.fontSize = '12px';
+  hint.style.color = 'var(--text-secondary)';
+  hint.style.marginLeft = '8px';
+  hint.style.opacity = '0';
+  hint.style.transition = 'opacity 0.18s ease';
+  wrapper.appendChild(hint);
+
+  wrapper.appendChild(results);
+
+  // Prefer inserting the search wrapper into the right-side header controls so it stays right-aligned.
+  const headerControls = document.getElementById('header-controls-right');
+  const status = document.getElementById('status');
+  if (headerControls) {
+    headerControls.insertBefore(wrapper, headerControls.firstChild);
+  } else if (status && status.parentElement === header) {
+    header.insertBefore(wrapper, status);
+  } else {
+    header.appendChild(wrapper);
+  }
+
+  let open = false;
+  let selectedIndex = -1;
+
+  function openInput() {
+    input.style.width = '260px';
+    input.style.opacity = '1';
+    input.focus();
+    hint.style.opacity = '1';
+    // center header controls when search is open
+    try {
+      const headerControls = document.getElementById('header-controls-right');
+      if (headerControls) {
+        headerControls.style.marginLeft = '0';
+        headerControls.style.marginRight = '0';
+        headerControls.style.margin = '0 auto';
+        headerControls.style.transform = 'translateY(0)';
+      }
+    } catch (err) {}
+    open = true;
+  }
+
+  function closeInput() {
+    input.value = '';
+    input.style.width = '0px';
+    input.style.opacity = '0';
+    results.style.display = 'none';
+    hint.style.opacity = '0';
+    // restore header controls to right-aligned
+    try {
+      const headerControls = document.getElementById('header-controls-right');
+      if (headerControls) {
+        headerControls.style.marginLeft = 'auto';
+        headerControls.style.marginRight = '';
+        headerControls.style.margin = '';
+        headerControls.style.transform = '';
+      }
+    } catch (err) {}
+    open = false;
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!open) openInput(); else closeInput();
+  });
+
+  // Close when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!wrapper.contains(e.target)) closeInput();
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      // Clear any highlighted result and close
+      selectedIndex = -1;
+      closeInput();
+      e.preventDefault();
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const rows = results.querySelectorAll('[data-chat-id]');
+      if (rows.length === 0) return;
+      if (selectedIndex < rows.length - 1) selectedIndex++; else selectedIndex = 0;
+      updateResultHighlight();
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const rows = results.querySelectorAll('[data-chat-id]');
+      if (rows.length === 0) return;
+      if (selectedIndex > 0) selectedIndex--; else selectedIndex = rows.length - 1;
+      updateResultHighlight();
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      const rows = results.querySelectorAll('[data-chat-id]');
+      if (selectedIndex >= 0 && selectedIndex < rows.length) {
+        const id = rows[selectedIndex].getAttribute('data-chat-id');
+        handleSearchResultClick(id);
+        e.preventDefault();
+        return;
+      }
+      const first = results.querySelector('[data-chat-id]');
+      if (first) {
+        const id = first.getAttribute('data-chat-id');
+        handleSearchResultClick(id);
+        e.preventDefault();
+      }
+    }
+  });
+
+  input.addEventListener('input', (e) => {
+    const q = String(e.target.value || '').trim();
+    if (!q) {
+      results.style.display = 'none';
+      return;
+    }
+    const matches = performSearch(q);
+    renderSearchResults(matches, results);
+  });
+
+  // Search through AppState.chats (name + recent message bodies)
+  function performSearch(query) {
+    const q = query.toLowerCase();
+    const out = [];
+    const seen = new Set();
+    const chats = AppState.chats || [];
+    for (const c of chats) {
+      let matched = false;
+      if ((c.name || '').toLowerCase().includes(q) || (c.chatId || '').toLowerCase().includes(q)) matched = true;
+      if (!matched) {
+        for (const m of (c.history || [])) {
+          if ((m.body || '').toLowerCase().includes(q)) { matched = true; break; }
+        }
+      }
+      if (matched && !seen.has(c.chatId)) { seen.add(c.chatId); out.push(c); }
+    }
+    return out;
+  }
+
+  // Utility: escape HTML to avoid XSS
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function escapeRegex(s) {
+    return s.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  }
+
+  function highlightMatches(text, query) {
+    if (!text) return '';
+    if (!query) return escapeHtml(text);
+    const escText = escapeHtml(text);
+    const escQuery = escapeHtml(query);
+    try {
+      const re = new RegExp(escapeRegex(escQuery), 'gi');
+      return escText.replace(re, (m) => `<span class="search-match" style="background:var(--color-accent);color:#fff;padding:2px 4px;border-radius:3px;">${escapeHtml(m)}</span>`);
+    } catch (err) {
+      return escText;
+    }
+  }
+
+  function renderSearchResults(list, container) {
+    container.innerHTML = '';
+    if (!list || !list.length) {
+      const nothing = document.createElement('div');
+      nothing.style.padding = '10px';
+      nothing.style.color = 'var(--text-secondary)';
+      nothing.textContent = 'No results';
+      container.appendChild(nothing);
+      container.style.display = 'block';
+      return;
+    }
+
+    let idx = 0;
+    selectedIndex = -1; // reset selection when new results come in
+    for (const c of list) {
+      const row = document.createElement('div');
+      row.dataset.index = idx;
+      idx++;
+      row.style.padding = '8px 10px';
+      row.style.borderBottom = '1px solid var(--border-light)';
+      row.style.cursor = 'pointer';
+      row.style.display = 'flex';
+      row.style.flexDirection = 'column';
+      row.dataset.chatId = c.chatId;
+
+      const title = document.createElement('div');
+      title.style.fontWeight = '600';
+      title.style.fontSize = '14px';
+      // highlight matches in title
+      const q = (input.value || '').trim();
+      title.innerHTML = highlightMatches(c.name || c.chatId || '', q);
+
+      const snippet = document.createElement('div');
+      snippet.style.fontSize = '12px';
+      snippet.style.color = 'var(--text-secondary)';
+      // find snippet from history
+      let sn = '';
+      if (c.history && c.history.length) {
+        const found = c.history.find(m => (m.body || '').toLowerCase().includes((input.value || '').toLowerCase()));
+        if (found) sn = found.body && (found.body.length > 80 ? found.body.slice(0, 80) + '...' : found.body);
+      }
+      snippet.innerHTML = highlightMatches(sn, (input.value || '').trim());
+
+      row.appendChild(title);
+      row.appendChild(snippet);
+
+      row.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const id = row.dataset.chatId;
+        handleSearchResultClick(id);
+      });
+
+      row.addEventListener('mouseenter', () => {
+        const i = Number(row.dataset.index);
+        selectedIndex = isNaN(i) ? -1 : i;
+        updateResultHighlight();
+      });
+
+      container.appendChild(row);
+    }
+
+    container.style.display = 'block';
+    // show hint when there are results
+    try {
+      if (hint) hint.style.opacity = (list && list.length) ? '1' : '0';
+    } catch (err) {}
+  }
+
+  function updateResultHighlight() {
+    const rows = results.querySelectorAll('[data-chat-id]');
+    rows.forEach((r, i) => {
+      if (i === selectedIndex) {
+        // High-contrast highlight using theme-aware variables
+        r.style.background = 'var(--color-accent-selected)';
+        r.style.outline = '3px solid var(--color-accent)';
+        r.style.boxShadow = '0 6px 18px rgba(0,0,0,0.12)';
+        r.style.color = 'var(--text-primary)';
+        r.style.fontWeight = '600';
+        r.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } else {
+        r.style.background = '';
+        r.style.outline = '';
+        r.style.boxShadow = '';
+        r.style.color = '';
+        r.style.fontWeight = '';
+      }
+    });
+  }
+
+  // When a search result is clicked, add it to selection (preserve existing selection), focus it and scroll into view
+  function handleSearchResultClick(chatId) {
+    if (!chatId) return;
+    // If there is already a selection, add to it; otherwise just add
+    if (!AppState.selectedChats) AppState.selectedChats = new Set();
+    AppState.selectedChats.add(chatId);
+    renderChats();
+
+    // scroll to element
+    const el = document.querySelector(`#messages [data-chat-id="${chatId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // brief highlight
+      el.style.transition = 'box-shadow 0.25s ease, transform 0.25s ease';
+      const prev = el.style.boxShadow;
+      el.style.boxShadow = '0 8px 28px rgba(0,0,0,0.25)';
+      setTimeout(() => { el.style.boxShadow = prev || 'var(--shadow-card)'; }, 800);
+    }
+
+    // keep search open for additional selection
   }
 }
 

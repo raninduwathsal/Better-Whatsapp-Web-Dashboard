@@ -33,6 +33,7 @@ Requirements
 - `Ctrl+T` - Create new tag
 - `Ctrl+R` - Refresh chats
 - `Ctrl+M` - Focus message input field
+- `Ctrl+F` - Focus search input
 - `Ctrl+Shift+R` - Mark selected chats as read
 
 **Modals**
