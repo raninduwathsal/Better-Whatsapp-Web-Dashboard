@@ -14,7 +14,8 @@ const AppState = {
   quickReplies: [],
   showAllQuickReplies: false,
   quickRepliesSettingsOpen: false,
-  currentContextMenu: null
+  currentContextMenu: null,
+  pendingSends: 0
 };
 
 // Export state
