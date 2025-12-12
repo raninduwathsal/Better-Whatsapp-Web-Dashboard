@@ -2,43 +2,45 @@ const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
+const { getClient } = require('../whatsapp/client');  // Import client
 
-// POST /api/logout - Delete WhatsApp session data and logout
+// Helper to safely delete deleted session folders
+function forceDelete(folderPath) {
+  try {
+    if (fs.existsSync(folderPath)) {
+      fs.rmSync(folderPath, { recursive: true, force: true });
+      console.log("Deleted:", folderPath);
+    }
+  } catch (err) {
+    console.log("Delete warning (ignored):", err.message);
+  }
+}
+
 router.post('/', async (req, res) => {
   try {
-    console.log('Logout requested - removing WhatsApp session data');
-    
+    console.log("Logout requested - destroying WhatsApp session");
+
+    const client = getClient();   // get the WhatsApp client instance
+    await client.destroy();       // VERY IMPORTANT — release puppeteer files
+    console.log("WhatsApp client destroyed");
+
     const authPath = path.join(__dirname, '..', '..', '.wwebjs_auth');
     const cachePath = path.join(__dirname, '..', '..', '.wwebjs_cache');
-    
-    // Delete .wwebjs_auth folder
-    if (fs.existsSync(authPath)) {
-      fs.rmSync(authPath, { recursive: true, force: true });
-      console.log('Deleted .wwebjs_auth folder');
-    }
-    
-    // Delete .wwebjs_cache folder
-    if (fs.existsSync(cachePath)) {
-      fs.rmSync(cachePath, { recursive: true, force: true });
-      console.log('Deleted .wwebjs_cache folder');
-    }
-    
-    res.json({ 
-      success: true, 
-      message: 'Logged out successfully. Session data cleared.' 
+
+    // Now safe to delete session folders fully
+    forceDelete(authPath);
+    forceDelete(cachePath);
+
+    res.json({
+      success: true,
+      message: "Logged out successfully. Session removed."
     });
-    
-    // Exit the process so it can be restarted
-    setTimeout(() => {
-      console.log('Exiting process for logout...');
-      process.exit(0);
-    }, 1000);
-    
+
   } catch (err) {
-    console.error('Error during logout:', err);
-    res.status(500).json({ 
-      success: false, 
-      error: err.message 
+    console.error("Logout error:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message
     });
   }
 });
