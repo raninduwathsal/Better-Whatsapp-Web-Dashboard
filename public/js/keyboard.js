@@ -27,6 +27,7 @@ const SHORTCUTS = {
   ui: [
     { keys: 'Ctrl+F', label: 'Focus Search', action: 'focus-search' },
     { keys: 'Ctrl+Alt+M', label: 'Mark Selected as Read', action: 'mark-as-read' },
+    { keys: 'Ctrl+Shift+R', label: 'Mark All Unread as Read', action: 'mark-all-read' },
     { keys: 'Ctrl+/', label: 'Show Keyboard Shortcuts', action: 'show-shortcuts' },
     { keys: '?', label: 'Show Keyboard Shortcuts', action: 'show-shortcuts' },
     { keys: 'Ctrl+H', label: 'Toggle Sidebar', action: 'toggle-sidebar' },
@@ -130,6 +131,12 @@ function handleGlobalKeyboard(e) {
       renderTagFilterChips();
       renderTagsSettings();
     });
+  } else if (ctrl && shift && (key === 'r' || key === 'R')) {
+    e.preventDefault();
+    // Mark all unread chats as read
+    if (typeof markAllUnreadAsRead === 'function') {
+      markAllUnreadAsRead();
+    }
   } else if (ctrl && key === 'r') {
     e.preventDefault();
     socket.emit('requestMessages');

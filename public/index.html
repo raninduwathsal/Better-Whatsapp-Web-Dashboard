@@ -127,6 +127,16 @@
       pointer-events: none;
     }
 
+    /* Drag selection rectangle */
+    #drag-selection-box {
+      position: fixed;
+      border: 2px solid var(--color-accent);
+      background: rgba(37, 211, 102, 0.15);
+      pointer-events: none;
+      z-index: 10000;
+      display: none;
+    }
+
     .meta {
       font-size: 13px;
       color: var(--text-primary);
@@ -328,6 +338,27 @@
       background: var(--color-accent-hover);
     }
 
+    #markAllReadBtn {
+      background: var(--bg-card);
+      border-color: var(--border-medium);
+      color: var(--text-primary);
+    }
+
+    #markAllReadBtn:hover {
+      border-color: var(--color-accent);
+      background: var(--bg-card-hover);
+    }
+
+    #markAllReadBtn:active {
+      background: var(--color-accent);
+      color: #fff;
+      transform: scale(1.1);
+    }
+
+    [data-theme="dark"] #markAllReadBtn:active {
+      color: #111;
+    }
+
     .modal .panel .composer {
       margin-top: 8px;
       display: flex;
@@ -481,6 +512,7 @@
             min-width: 200px;
           " />
       <button id="sendBtn" class="qr-btn">Send</button>
+      <button id="markAllReadBtn" class="qr-btn" title="Mark All Unread Chats as Read">✓</button>
       <button id="refresh" class="qr-btn" title="Refresh Chats">↻</button>
       <button id="darkModeToggle" class="qr-btn" title="Toggle Dark Mode">🌙</button>
     </div>
@@ -494,6 +526,9 @@
       Connecting...
     </div>
   </header>
+
+  <!-- Drag selection box -->
+  <div id="drag-selection-box"></div>
 
   <div id="tag-filter-chips" style="
         display: flex;

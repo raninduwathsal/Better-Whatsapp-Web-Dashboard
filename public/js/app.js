@@ -38,6 +38,12 @@ function initializeApp() {
     });
   }
 
+  // Mark All Read button functionality
+  const markAllReadBtn = document.getElementById('markAllReadBtn');
+  if (markAllReadBtn) {
+    markAllReadBtn.addEventListener('click', markAllUnreadAsRead);
+  }
+
   // Allow pressing Enter in the preset input to send the preset
   if (AppState.presetInput) {
     AppState.presetInput.addEventListener('keydown', (e) => {

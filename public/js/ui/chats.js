@@ -3,6 +3,14 @@
  * Handles rendering of chat list and messages
  */
 
+// Drag selection state
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let dragSelectionBox = null;
+let initialSelectedChats = new Set();
+let hasDraggedEnough = false;
+
 function renderChats() {
   const messagesEl = document.getElementById('messages');
   if (!messagesEl) return;
@@ -219,8 +227,19 @@ function renderChats() {
     // Handle single and double-click
     let clickCount = 0;
     let clickTimer;
+    let mouseDownTime = 0;
+    
+    el.addEventListener('mousedown', (e) => {
+      mouseDownTime = Date.now();
+    });
     
     el.addEventListener('click', (e) => {
+      // Don't handle click if this was part of a drag selection
+      const clickTime = Date.now() - mouseDownTime;
+      if (clickTime > 150 && hasDraggedEnough) {
+        return;
+      }
+      
       clickCount++;
       
       if (clickCount === 1) {
@@ -263,4 +282,174 @@ function renderChats() {
       renderChats();
     }
   });
+}
+
+/**
+ * Initialize drag-to-select functionality
+ */
+function initDragSelection() {
+  const messagesEl = document.getElementById('messages');
+  if (!messagesEl) return;
+
+  dragSelectionBox = document.getElementById('drag-selection-box');
+  if (!dragSelectionBox) return;
+
+  // Mouse down - start drag selection (listen on document to catch clicks anywhere)
+  document.addEventListener('mousedown', (e) => {
+    // Only start drag if not clicking on interactive elements (buttons, inputs, etc.)
+    if (e.target.matches('button, input, textarea, a, svg, path') || e.target.closest('button, input, textarea, a')) {
+      return;
+    }
+    
+    // Check if we're in the messages area or tag filter chips area
+    const inMessagesArea = e.target === messagesEl || e.target.closest('#messages');
+    const inTagArea = e.target.closest('#tag-filter-chips');
+    
+    if (!inMessagesArea && !inTagArea) {
+      return;
+    }
+    
+    // Start drag selection immediately - we'll handle single/double clicks separately
+    isDragging = true;
+    hasDraggedEnough = false;
+    dragStartX = e.pageX;
+    dragStartY = e.pageY;
+    
+    // Store initial selection state
+    initialSelectedChats = new Set(AppState.selectedChats);
+    
+    // Initialize selection box (but don't show it yet)
+    dragSelectionBox.style.left = dragStartX + 'px';
+    dragSelectionBox.style.top = dragStartY + 'px';
+    dragSelectionBox.style.width = '0px';
+    dragSelectionBox.style.height = '0px';
+    dragSelectionBox.style.display = 'none';
+    
+    e.preventDefault();
+  });
+
+  // Mouse move - update selection box and select cards
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+
+    const currentX = e.pageX;
+    const currentY = e.pageY;
+
+    // Calculate selection box dimensions
+    const left = Math.min(dragStartX, currentX);
+    const top = Math.min(dragStartY, currentY);
+    const width = Math.abs(currentX - dragStartX);
+    const height = Math.abs(currentY - dragStartY);
+
+    // Only show selection box and start selecting if dragged more than 5px
+    const dragDistance = width + height;
+    if (dragDistance > 5) {
+      hasDraggedEnough = true;
+      dragSelectionBox.style.display = 'block';
+    }
+
+    // Update selection box
+    dragSelectionBox.style.left = left + 'px';
+    dragSelectionBox.style.top = top + 'px';
+    dragSelectionBox.style.width = width + 'px';
+    dragSelectionBox.style.height = height + 'px';
+    
+    // Only update selection if we've dragged enough
+    if (!hasDraggedEnough) return;
+
+    // Get selection box bounds
+    const selectionRect = {
+      left: left,
+      top: top,
+      right: left + width,
+      bottom: top + height
+    };
+
+    // Check which cards intersect with selection box
+    const chatCards = messagesEl.querySelectorAll('.msg');
+    const newSelection = new Set(initialSelectedChats);
+
+    chatCards.forEach(card => {
+      const rect = card.getBoundingClientRect();
+      const cardRect = {
+        left: rect.left + window.scrollX,
+        top: rect.top + window.scrollY,
+        right: rect.right + window.scrollX,
+        bottom: rect.bottom + window.scrollY
+      };
+
+      // Check if rectangles intersect
+      const intersects = !(
+        cardRect.right < selectionRect.left ||
+        cardRect.left > selectionRect.right ||
+        cardRect.bottom < selectionRect.top ||
+        cardRect.top > selectionRect.bottom
+      );
+
+      const chatId = card.dataset.chatId;
+      if (intersects) {
+        // Add to selection if intersecting
+        newSelection.add(chatId);
+      } else if (!initialSelectedChats.has(chatId)) {
+        // Remove from selection if not intersecting and wasn't initially selected
+        newSelection.delete(chatId);
+      }
+    });
+
+    // Update selection only if we've dragged enough
+    if (hasDraggedEnough) {
+      AppState.selectedChats = newSelection;
+      renderChats();
+    }
+  });
+
+  // Mouse up - end drag selection
+  document.addEventListener('mouseup', (e) => {
+    if (!isDragging) return;
+
+    // If we actually dragged, finalize the selection
+    if (hasDraggedEnough) {
+      // Selection already updated during mousemove
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    isDragging = false;
+    hasDraggedEnough = false;
+    dragSelectionBox.style.display = 'none';
+    initialSelectedChats.clear();
+  });
+}
+
+/**
+ * Mark all unread chats as read
+ */
+function markAllUnreadAsRead() {
+  const unreadChats = Array.from(AppState.chats).filter(c => c.unreadCount > 0);
+  
+  if (unreadChats.length === 0) {
+    alert('No unread chats to mark as read');
+    return;
+  }
+
+  if (!confirm(`Mark ${unreadChats.length} unread chat${unreadChats.length !== 1 ? 's' : ''} as read?`)) {
+    return;
+  }
+
+  // Mark each unread chat as read
+  for (const chat of unreadChats) {
+    if (window.socket && window.socket.connected) {
+      window.socket.emit('markAsRead', { chatId: chat.chatId });
+    }
+  }
+
+  // Show feedback
+  alert(`Marked ${unreadChats.length} chat${unreadChats.length !== 1 ? 's' : ''} as read`);
+}
+
+// Initialize drag selection when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initDragSelection);
+} else {
+  initDragSelection();
 }

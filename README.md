@@ -34,7 +34,8 @@ Requirements
 - `Ctrl+R` - Refresh chats
 - `Ctrl+M` - Focus message input field
 - `Ctrl+F` - Focus search input
-- `Ctrl+Alt+M` - Mark selected chats as read (used to be ctrl+shift+r:now deprecated)
+- `Ctrl+Alt+M` - Mark selected chats as read
+- `Ctrl+Shift+R` - Mark all unread chats as read
 
 **Modals**
 - `Ctrl+Enter` - Save/confirm in tag/quick reply/note editors
