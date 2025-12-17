@@ -1,0 +1,29 @@
+
+.github-loader {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 3px; /* Thin bar */
+    background-color: #0366d6; /* GitHub blue color */
+    z-index: 9999;
+    transition: width 0.3s ease-in-out;
+    transform: translateZ(0); /* Hardware acceleration */
+}
+
+.github-loader.loading {
+    animation: loader-animation 2s linear infinite; /* Longer duration to show progress feeling */
+}
+
+@keyframes loader-animation {
+    0% { width: 0%; }
+    50% { width: 70%; } /* Stalls at 70% to simulate waiting for server response */
+    100% { width: 95%; } /* Max width before completion */
+}
+
+.github-loader.done {
+    width: 100%;
+    transition: width 0.1s ease-out;
+    opacity: 0;
+}
+

@@ -54,21 +54,62 @@ function initializeApp() {
     });
   }
 }
+AppState.pendingSends = 0;
+/**
+ * Toggles a GitHub-style loading indicator at the top of the screen.
+ * @param {boolean} isLoading - true to start the loader, false to stop.
+ */
+function toggleAppLoader(isLoading) {
+    const loader = document.getElementById('app-loader');
+    if (!loader) return;
+
+    if (isLoading) {
+        loader.classList.remove('done');
+        // Start from 0 width to reset
+        loader.style.width = '0%';
+        // Use a timeout to ensure the CSS reset is applied before starting the animation
+        setTimeout(() => {
+            loader.classList.add('loading');
+        }, 10);
+    } else {
+        loader.classList.remove('loading');
+        loader.classList.add('done');
+        // Instantly transition to 100% and then fade out via CSS `done` class
+        loader.style.width = '100%';
+        // Remove 'done' after transition completes to reset for next use
+        setTimeout(() => {
+            loader.classList.remove('done');
+            loader.style.width = '0%';
+        }, 500); // 500ms should be enough for the 'done' transition
+    }
+}
 
 function sendPreset() {
-  const ids = Array.from(AppState.selectedChats);
-  const text = AppState.presetInput.value && AppState.presetInput.value.trim();
-  if (!ids.length) {
-    AppState.statusEl.textContent = 'No chat selected';
-    return;
-  }
-  if (!text) {
-    AppState.statusEl.textContent = 'No preset text';
-    return;
-  }
-  for (const id of ids) {
-    socket.emit('sendPreset', { chatId: id, text });
-  }
+  const ids = Array.from(AppState.selectedChats);
+  const text = AppState.presetInput.value && AppState.presetInput.value.trim();
+  if (!ids.length) {
+    AppState.statusEl.textContent = 'No chat selected';
+    return;
+  }
+  if (!text) {
+    AppState.statusEl.textContent = 'No preset text';
+    return;
+  }
+
+  // 1. START LOADER
+  toggleAppLoader(true);
+  
+  // 2. Initialize pending sends counter (New line)
+  AppState.pendingSends = ids.length; 
+  
+  // 3. Update status immediately and clear input for speed perception
+  AppState.statusEl.textContent = `Sending reply to ${ids.length} chat(s)...`;
+  AppState.presetInput.value = '';
+  
+  // 4. Send the preset message(s)
+  for (const id of ids) {
+    socket.emit('sendPreset', { chatId: id, text });
+  }
 }
 
 function createSettingsSidebar() {
