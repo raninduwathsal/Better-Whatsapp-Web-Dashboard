@@ -55,7 +55,33 @@ function initializeApp() {
   }
 }
 
-function sendPreset() {
+async function sendBulkMessagesWithDelay(ids, text) {
+  if (!ids || !ids.length) return;
+  const originalStatus = AppState.statusEl.textContent;
+  
+  // Use user-defined delay or default to 2500ms
+  const delayMs = AppState.bulkMessageDelay || 2500;
+  
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    AppState.statusEl.textContent = `Sending ${i + 1} of ${ids.length}...`;
+    socket.emit('sendPreset', { chatId: id, text });
+    
+    // Wait for delay, except after the last message
+    if (i < ids.length - 1) {
+      await new Promise(res => setTimeout(res, delayMs));
+    }
+  }
+  
+  AppState.statusEl.textContent = `Sent to ${ids.length} chat(s)`;
+  setTimeout(() => {
+    if (AppState.statusEl.textContent.startsWith('Sent to')) {
+      AppState.statusEl.textContent = originalStatus;
+    }
+  }, 3000);
+}
+
+async function sendPreset() {
   const ids = Array.from(AppState.selectedChats);
   const text = AppState.presetInput.value && AppState.presetInput.value.trim();
   if (!ids.length) {
@@ -66,9 +92,7 @@ function sendPreset() {
     AppState.statusEl.textContent = 'No preset text';
     return;
   }
-  for (const id of ids) {
-    socket.emit('sendPreset', { chatId: id, text });
-  }
+  await sendBulkMessagesWithDelay(ids, text);
 }
 
 function createSettingsSidebar() {
@@ -177,6 +201,28 @@ function createSettingsSidebar() {
   });
   togglesContainer.appendChild(quickRepliesToggle);
 
+  // Bulk Messaging toggle
+  const bulkMessagingToggle = document.createElement('div');
+  bulkMessagingToggle.style.padding = '8px 12px';
+  bulkMessagingToggle.style.borderBottom = '1px solid var(--border-light)';
+  bulkMessagingToggle.style.cursor = 'pointer';
+  bulkMessagingToggle.style.display = 'flex';
+  bulkMessagingToggle.style.justifyContent = 'space-between';
+  bulkMessagingToggle.style.alignItems = 'center';
+  const bulkMessagingLabel = document.createElement('span');
+  bulkMessagingLabel.textContent = 'Bulk Messaging';
+  const bulkMessagingChevron = document.createElement('span');
+  bulkMessagingChevron.textContent = '▼';
+  bulkMessagingChevron.style.fontSize = '10px';
+  bulkMessagingToggle.appendChild(bulkMessagingLabel);
+  bulkMessagingToggle.appendChild(bulkMessagingChevron);
+  bulkMessagingToggle.addEventListener('click', () => {
+    AppState.bulkMessagingSettingsOpen = !AppState.bulkMessagingSettingsOpen;
+    bulkMessagingChevron.textContent = AppState.bulkMessagingSettingsOpen ? '▲' : '▼';
+    renderBulkMessagingSettings();
+  });
+  togglesContainer.appendChild(bulkMessagingToggle);
+
   // Keyboard Shortcuts button
   const shortcutsBtn = document.createElement('div');
   shortcutsBtn.style.padding = '8px 12px';
@@ -274,6 +320,73 @@ function createSettingsSidebar() {
       });
     });
   }
+}
+
+function renderBulkMessagingSettings() {
+  let panel = document.getElementById('sidebar-bulk-messaging');
+  if (!panel) {
+    const contentContainer = document.getElementById('settings-content');
+    if (contentContainer) {
+      panel = document.createElement('div');
+      panel.id = 'sidebar-bulk-messaging';
+      panel.style.padding = '8px';
+      panel.style.borderBottom = '1px solid var(--border-light)';
+      contentContainer.appendChild(panel);
+    } else {
+      return;
+    }
+  }
+
+  if (!AppState.bulkMessagingSettingsOpen) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  panel.innerHTML = '';
+  panel.style.padding = '12px';
+
+  const title = document.createElement('div');
+  title.style.fontWeight = 'bold';
+  title.textContent = 'Bulk Messaging';
+  title.style.marginBottom = '12px';
+  panel.appendChild(title);
+
+  const delayLabel = document.createElement('div');
+  delayLabel.textContent = 'Delay Between Messages (ms):';
+  delayLabel.style.fontSize = '12px';
+  delayLabel.style.color = 'var(--text-secondary)';
+  delayLabel.style.marginBottom = '4px';
+  panel.appendChild(delayLabel);
+
+  const delayInput = document.createElement('input');
+  delayInput.type = 'number';
+  delayInput.min = '500';
+  delayInput.max = '60000';
+  delayInput.step = '500';
+  delayInput.value = AppState.bulkMessageDelay || 2500;
+  delayInput.style.width = '100%';
+  delayInput.style.padding = '8px';
+  delayInput.style.border = '1px solid var(--border-medium)';
+  delayInput.style.borderRadius = '6px';
+  delayInput.style.background = 'var(--bg-input)';
+  delayInput.style.color = 'var(--text-primary)';
+  delayInput.style.marginBottom = '12px';
+  
+  delayInput.addEventListener('change', (e) => {
+    let val = parseInt(e.target.value);
+    if (isNaN(val) || val < 500) val = 500;
+    AppState.bulkMessageDelay = val;
+    delayInput.value = val;
+  });
+  
+  panel.appendChild(delayInput);
+  
+  const helpText = document.createElement('div');
+  helpText.textContent = 'Increase the delay to reduce the chance of WhatsApp flagging your account for spam during bulk messaging.';
+  helpText.style.fontSize = '11px';
+  helpText.style.color = 'var(--text-secondary)';
+  panel.appendChild(helpText);
 }
 
 function toggleSidebar() {

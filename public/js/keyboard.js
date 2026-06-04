@@ -255,8 +255,7 @@ function getDisplayNameForChat(chatId) {
   return chat ? (chat.name || chatId) : chatId;
 }
 
-// Send quick reply by index (0-based)
-function sendQuickReplyByIndex(index) {
+async function sendQuickReplyByIndex(index) {
   if (AppState.selectedChats.size === 0) {
     AppState.statusEl.textContent = 'Please select a chat first';
     return;
@@ -267,10 +266,8 @@ function sendQuickReplyByIndex(index) {
   }
 
   const qr = AppState.quickReplies[index];
-  for (const chatId of AppState.selectedChats) {
-    socket.emit('sendPreset', { chatId, text: qr.text });
-  }
-  AppState.statusEl.textContent = `Sent: ${qr.text.substring(0, 30)}${qr.text.length > 30 ? '...' : ''}`;
+  const ids = Array.from(AppState.selectedChats);
+  await sendBulkMessagesWithDelay(ids, qr.text);
 }
 
 // Show keyboard shortcuts guide

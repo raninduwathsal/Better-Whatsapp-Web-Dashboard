@@ -88,16 +88,15 @@ function renderQuickReplies() {
     btn.title = qr.text;
     btn.style.fontSize = '11px';
     btn.style.padding = '4px 8px';
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       // Send the message to all selected chats
       if (AppState.selectedChats.size === 0) {
         alert('Please select at least one chat first');
         return;
       }
 
-      for (const chatId of AppState.selectedChats) {
-        socket.emit('sendPreset', { chatId, text: qr.text });
-      }
+      const ids = Array.from(AppState.selectedChats);
+      await sendBulkMessagesWithDelay(ids, qr.text);
     });
     wrapper.appendChild(btn);
   }
